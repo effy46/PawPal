@@ -117,7 +117,7 @@ export function PetView(): JSX.Element {
   }, []);
 
   const codexState = snapshot.codexActivity.state;
-  const showCodexActivity = !snapshot.blockingMode && codexState !== "idle";
+  const showCodexActivity = !bubble && !snapshot.blockingMode && codexState !== "idle";
   const showCodexMulti = showCodexActivity && snapshot.codexActivity.sessions.length > 1;
   const state = showCodexActivity ? CODEX_STATE_TO_PET_STATE[codexState] : snapshot.petState;
   const altText = `PawPal ${state}`;
@@ -227,7 +227,7 @@ export function PetView(): JSX.Element {
 
   useEffect(() => {
     if (!showCodexMulti) setCodexExpanded(false);
-  }, [showCodexMulti]);
+  }, [bubble, showCodexMulti, snapshot.blockingMode]);
 
   function startPointer(event: PointerEvent<HTMLButtonElement>): void {
     if (event.button !== 0) return;

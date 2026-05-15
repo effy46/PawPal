@@ -141,6 +141,7 @@ function formatCodexActivityState(state: CodexActivityState, labels: SettingsCop
     idle: labels.codexIdle,
     working: labels.codexWorking,
     reviewing: labels.codexReviewing,
+    complete: labels.codexComplete,
     waiting: labels.codexWaiting,
     error: labels.codexError
   };

@@ -10,6 +10,7 @@ import {
   Menu,
   nativeTheme,
   net,
+  powerMonitor,
   protocol,
   screen,
   shell,
@@ -894,6 +895,13 @@ function registerDisplayChangeHandlers(): void {
   screen.on("display-metrics-changed", schedulePetDisplayRepair);
 }
 
+function registerPowerMonitorHandlers(): void {
+  powerMonitor.on("lock-screen", pauseReminderTimersForAway);
+  powerMonitor.on("suspend", pauseReminderTimersForAway);
+  powerMonitor.on("unlock-screen", restartReminderTimersAfterAway);
+  powerMonitor.on("resume", restartReminderTimersAfterAway);
+}
+
 function createPetWindow(): void {
   const bounds = initialPetBounds();
   petMouseInteractive = true;
@@ -1227,11 +1235,17 @@ function startBreakRun(): void {
   publishSnapshot();
 }
 
-function scheduleReminderTimers(): void {
+function clearReminderTimers(): void {
   if (breakTimer) clearTimeout(breakTimer);
   if (hydrationTimer) clearTimeout(hydrationTimer);
+  breakTimer = null;
+  hydrationTimer = null;
   breakDueAt = null;
   hydrationDueAt = null;
+}
+
+function scheduleReminderTimers(): void {
+  clearReminderTimers();
 
   const settings = getSettings();
   if (settings.breakReminderEnabled && !breakMutedToday) {
@@ -1249,6 +1263,27 @@ function scheduleReminderTimers(): void {
     );
   }
   publishSnapshot();
+}
+
+function pauseReminderTimersForAway(): void {
+  const wasReminderActive = blockingMode === "break" || blockingMode === "hydration";
+  clearReminderTimers();
+  if (wasReminderActive) {
+    blockingMode = null;
+    hideBubble();
+    setPetState(focusActive ? "focusGuard" : "idle");
+  }
+  publishSnapshot();
+}
+
+function restartReminderTimersAfterAway(): void {
+  if (blockingMode === "breakRun") return;
+  if (blockingMode === "break" || blockingMode === "hydration") {
+    blockingMode = null;
+    hideBubble();
+    setPetState(focusActive ? "focusGuard" : "idle");
+  }
+  scheduleReminderTimers();
 }
 
 function setDistractionStatus(partial: Partial<DistractionStatus>): void {
@@ -1678,6 +1713,7 @@ app.whenReady().then(() => {
   createPetWindow();
   createTray();
   registerDisplayChangeHandlers();
+  registerPowerMonitorHandlers();
   scheduleCodexActivityPolling();
   scheduleReminderTimers();
   scheduleDistractionDetection();

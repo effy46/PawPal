@@ -48,7 +48,8 @@ export function useSnapshot(): AppSnapshot {
       message: null,
       updatedAt: null,
       path: "",
-      source: "manual"
+      source: "manual",
+      sessions: []
     },
     blockingMode: null,
     focusActive: false,
