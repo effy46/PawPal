@@ -6,6 +6,16 @@ export type PetAppearanceId = BuiltInPetAppearanceId | "custom";
 
 export type PetFacing = "left" | "right";
 
+export type CodexActivityState = "idle" | "working" | "reviewing" | "waiting" | "error";
+
+export type CodexActivity = {
+  state: CodexActivityState;
+  message: string | null;
+  updatedAt: number | null;
+  path: string;
+  source: "manual" | "codex-session";
+};
+
 export type PetState =
   | "idle"
   | "sitting"
@@ -103,6 +113,7 @@ export type AppSnapshot = {
   distraction: DistractionStatus;
   petState: PetState;
   petFacing: PetFacing;
+  codexActivity: CodexActivity;
   blockingMode: BlockingMode;
   focusActive: boolean;
   dogVisible: boolean;
@@ -133,7 +144,12 @@ export type DemoTrigger =
   | "break"
   | "hydration"
   | "focusWarning"
-  | "happy";
+  | "happy"
+  | "codexIdle"
+  | "codexWorking"
+  | "codexReviewing"
+  | "codexWaiting"
+  | "codexError";
 
 export type RendererEventMap = {
   "pet:set-state": PetState;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { JSX, PointerEvent } from "react";
 import { i18n, resolveLanguage } from "../../../shared/i18n";
-import type { PetState, SpeechBubble } from "../../../shared/types";
+import type { CodexActivityState, PetState, SpeechBubble } from "../../../shared/types";
 import { getPetAsset, getPetAssetVariantCount } from "../assets";
 import { useNow, useSnapshot } from "../hooks";
 import { pointInElementHitbox } from "../petHitbox";
@@ -18,6 +18,18 @@ const CONTINUOUS_ASSET_ROTATION_MS = 15 * 60 * 1000;
 const DRAG_START_DISTANCE_PX = 10;
 const PET_BUTTON_SELECTOR = ".pet-button";
 const BUBBLE_INTERACTIVE_SELECTOR = ".speech-bubble";
+
+const CODEX_STATE_TO_PET_STATE: Record<CodexActivityState, PetState> = {
+  idle: "idle",
+  working: "focusGuard",
+  reviewing: "focusAlert",
+  waiting: "sitting",
+  error: "sad"
+};
+
+function codexStateLabel(state: CodexActivityState): string {
+  return state[0].toUpperCase() + state.slice(1);
+}
 
 function randomVariant(count: number, previous?: number): number {
   if (count <= 1) return 0;
@@ -60,7 +72,9 @@ export function PetView(): JSX.Element {
     };
   }, []);
 
-  const state = snapshot.petState;
+  const codexState = snapshot.codexActivity.state;
+  const showCodexActivity = !snapshot.blockingMode && codexState !== "idle";
+  const state = showCodexActivity ? CODEX_STATE_TO_PET_STATE[codexState] : snapshot.petState;
   const altText = `PawPal ${state}`;
   const facingClass = snapshot.petFacing === "left" ? "facing-left" : "facing-right";
   const appearanceId = snapshot.settings.petAppearanceId;
@@ -234,10 +248,18 @@ export function PetView(): JSX.Element {
         </div>
       ) : null}
 
+      {showCodexActivity ? (
+        <div className={`codex-badge codex-badge--${codexState}`}>
+          <span>Codex</span>
+          <strong>{codexStateLabel(codexState)}</strong>
+        </div>
+      ) : null}
+
       <button
-        className={`pet-button state-${state} ${facingClass} ${
+        className={`pet-button state-${state} codex-${codexState} ${facingClass} ${
           asset.isPlaceholder ? "placeholder-asset" : ""
         }`}
+        aria-label={altText}
         onPointerCancel={cancelPointer}
         onPointerDown={startPointer}
         onLostPointerCapture={() => finishPointerDrag(false)}

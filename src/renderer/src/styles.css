@@ -101,6 +101,23 @@ textarea {
 }
 
 .state-focusAlert {
+  animation: pet-alert 0.5s ease-in-out infinite;
+}
+
+.codex-working {
+  filter: drop-shadow(0 6px 10px rgba(36, 78, 69, 0.18));
+}
+
+.codex-reviewing {
+  filter: drop-shadow(0 6px 10px rgba(94, 83, 52, 0.2));
+}
+
+.codex-waiting {
+  opacity: 0.9;
+}
+
+.codex-error {
+  filter: drop-shadow(0 6px 10px rgba(168, 70, 45, 0.24));
 }
 
 .speech-bubble {
@@ -189,6 +206,49 @@ textarea {
   color: #2d261f;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+.codex-badge {
+  align-items: baseline;
+  background: rgba(255, 252, 244, 0.9);
+  border: 1px solid rgba(36, 78, 69, 0.16);
+  border-radius: 999px;
+  bottom: 34px;
+  box-shadow: 0 6px 16px rgba(45, 38, 31, 0.12);
+  color: #244e45;
+  display: flex;
+  gap: 6px;
+  left: 50%;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0;
+  max-width: 168px;
+  overflow: hidden;
+  padding: 4px 8px;
+  pointer-events: auto;
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.codex-badge strong {
+  color: #2d261f;
+  font-size: 11px;
+}
+
+.codex-badge--error {
+  border-color: rgba(168, 70, 45, 0.24);
+  color: #a8462d;
+}
+
+.codex-badge--reviewing {
+  border-color: rgba(182, 125, 58, 0.24);
+  color: #7b551f;
+}
+
+.codex-badge--waiting {
+  color: #6e6457;
 }
 
 .prefs {

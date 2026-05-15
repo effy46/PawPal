@@ -11,6 +11,7 @@ import {
 } from "../../../shared/petAppearances";
 import type {
   BuiltInPetAppearanceId,
+  CodexActivityState,
   CustomPetAppearance,
   CustomPetAsset,
   DemoTrigger,
@@ -133,6 +134,17 @@ function SelectControl({
       ))}
     </select>
   );
+}
+
+function formatCodexActivityState(state: CodexActivityState, labels: SettingsCopy): string {
+  const labelMap: Record<CodexActivityState, string> = {
+    idle: labels.codexIdle,
+    working: labels.codexWorking,
+    reviewing: labels.codexReviewing,
+    waiting: labels.codexWaiting,
+    error: labels.codexError
+  };
+  return labelMap[state];
 }
 
 function ChipsControl({
@@ -600,6 +612,11 @@ export function SettingsView(): JSX.Element {
             <DemoChip trigger="hydration" label={labels.demoWater} />
             <DemoChip trigger="focusWarning" label={labels.demoFocusWarning} />
             <DemoChip trigger="happy" label={labels.demoHappy} />
+            <DemoChip trigger="codexIdle" label={labels.demoCodexIdle} />
+            <DemoChip trigger="codexWorking" label={labels.demoCodexWorking} />
+            <DemoChip trigger="codexReviewing" label={labels.demoCodexReviewing} />
+            <DemoChip trigger="codexWaiting" label={labels.demoCodexWaiting} />
+            <DemoChip trigger="codexError" label={labels.demoCodexError} />
             <button type="button" className="pref-chip-button" onClick={window.pawpal.resetToday}>
               {labels.resetToday}
             </button>
@@ -709,8 +726,16 @@ export function SettingsView(): JSX.Element {
               />
               <DiagCard label={labels.reminder} value={snapshot.blockingMode ?? labels.none} />
               <DiagCard
+                label={labels.codex}
+                value={formatCodexActivityState(snapshot.codexActivity.state, labels)}
+              />
+              <DiagCard
                 label={labels.dog}
                 value={snapshot.dogVisible ? labels.visible : labels.hidden}
+              />
+              <DiagCard
+                label={labels.codexActivityPath}
+                value={snapshot.codexActivity.path || labels.none}
               />
             </DiagGroup>
 

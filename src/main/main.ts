@@ -1,6 +1,7 @@
 import { basename, extname, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir, open, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import {
   app,
   BrowserWindow,
@@ -24,6 +25,8 @@ import { PET_STATE_ORDER } from "../shared/petAppearances";
 import type {
   AppSnapshot,
   BlockingMode,
+  CodexActivity,
+  CodexActivityState,
   CustomPetAsset,
   DistractionStatus,
   DemoTrigger,
@@ -115,6 +118,7 @@ let focusTimer: NodeJS.Timeout | null = null;
 let distractionTimer: NodeJS.Timeout | null = null;
 let distractionStartupTimer: NodeJS.Timeout | null = null;
 let displayChangeTimer: NodeJS.Timeout | null = null;
+let codexActivityTimer: NodeJS.Timeout | null = null;
 let breakDueAt: number | null = null;
 let hydrationDueAt: number | null = null;
 let focusEndsAt: number | null = null;
@@ -137,6 +141,55 @@ let distractionStatus: DistractionStatus = {
   error: null
 };
 let updateCheck: UpdateCheckResult = createInitialUpdateCheck();
+
+function codexActivityPath(): string {
+  return join(app.getPath("home"), ".codex", "pawpal", "activity.json");
+}
+
+function codexActivityDirectory(): string {
+  return join(app.getPath("home"), ".codex", "pawpal");
+}
+
+function codexSessionsRoot(): string {
+  return join(app.getPath("home"), ".codex", "sessions");
+}
+
+function codexSessionSearchRoots(): string[] {
+  return Array.from({ length: 7 }, (_unused, offset) => {
+    const date = new Date(Date.now() - offset * 24 * 60 * 60 * 1000);
+    return join(
+      codexSessionsRoot(),
+      String(date.getFullYear()),
+      String(date.getMonth() + 1).padStart(2, "0"),
+      String(date.getDate()).padStart(2, "0")
+    );
+  });
+}
+
+let codexActivity: CodexActivity = {
+  state: "idle",
+  message: null,
+  updatedAt: null,
+  path: codexActivityPath(),
+  source: "manual"
+};
+
+const CODEX_SESSION_TAIL_BYTES = 256 * 1024;
+const CODEX_SESSION_ACTIVE_STALE_MS = 10 * 60 * 1000;
+const CODEX_SESSION_POLL_MS = 1000;
+
+type CodexSessionEvent = {
+  timestamp?: string;
+  type?: string;
+  payload?: {
+    type?: string;
+    name?: string;
+    role?: string;
+    message?: string;
+    last_agent_message?: string;
+    output?: string;
+  };
+};
 
 function setPetMouseInteractive(interactive: boolean): void {
   if (!petWindow || petWindow.isDestroyed() || petMouseInteractive === interactive) return;
@@ -245,6 +298,7 @@ function snapshot(): AppSnapshot {
     distraction: distractionStatus,
     petState,
     petFacing,
+    codexActivity,
     blockingMode,
     dogVisible: Boolean(petWindow?.isVisible()),
     focusActive
@@ -270,6 +324,241 @@ function publishSnapshot(): void {
 function setPetState(next: PetState): void {
   petState = next;
   sendToAll("pet:set-state", next);
+}
+
+function isCodexActivityState(value: unknown): value is CodexActivityState {
+  return (
+    value === "idle" ||
+    value === "working" ||
+    value === "reviewing" ||
+    value === "waiting" ||
+    value === "error"
+  );
+}
+
+function normalizeCodexActivity(value: unknown): CodexActivity {
+  const path = codexActivityPath();
+  if (!value || typeof value !== "object") {
+    return { state: "idle", message: null, updatedAt: null, path, source: "manual" };
+  }
+  const source = value as Partial<CodexActivity>;
+  const state = isCodexActivityState(source.state) ? source.state : "idle";
+  return {
+    state,
+    message: typeof source.message === "string" && source.message.trim() ? source.message.trim() : null,
+    updatedAt: typeof source.updatedAt === "number" ? source.updatedAt : Date.now(),
+    path,
+    source: source.source === "codex-session" ? "codex-session" : "manual"
+  };
+}
+
+function setCodexActivity(next: CodexActivity): void {
+  const changed =
+    codexActivity.state !== next.state ||
+    codexActivity.message !== next.message ||
+    codexActivity.updatedAt !== next.updatedAt ||
+    codexActivity.path !== next.path ||
+    codexActivity.source !== next.source;
+  if (!changed) return;
+  codexActivity = next;
+  publishSnapshot();
+}
+
+async function readStoredCodexActivity(): Promise<CodexActivity | null> {
+  try {
+    const raw = await readFile(codexActivityPath(), "utf8");
+    return normalizeCodexActivity(JSON.parse(raw));
+  } catch (error) {
+    const code = typeof error === "object" && error !== null && "code" in error ? error.code : null;
+    if (code === "ENOENT") return null;
+    return {
+      state: "error",
+      message: error instanceof Error ? error.message : String(error),
+      updatedAt: Date.now(),
+      path: codexActivityPath(),
+      source: "manual"
+    };
+  }
+}
+
+async function writeCodexActivityFile(activity: CodexActivity): Promise<void> {
+  const { path: _path, ...payload } = activity;
+  await mkdir(codexActivityDirectory(), { recursive: true });
+  await writeFile(codexActivityPath(), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+}
+
+async function writeCodexActivityDemo(state: CodexActivityState, message: string | null): Promise<void> {
+  const next: CodexActivity = {
+    state,
+    message,
+    updatedAt: Date.now(),
+    path: codexActivityPath(),
+    source: "manual"
+  };
+  await writeCodexActivityFile(next);
+  setCodexActivity(next);
+}
+
+async function findLatestCodexSessionFile(directory: string): Promise<{ path: string; mtimeMs: number } | null> {
+  let latest: { path: string; mtimeMs: number } | null = null;
+  let entries: Dirent[];
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+
+  for (const entry of entries) {
+    const entryPath = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      const nestedLatest = await findLatestCodexSessionFile(entryPath);
+      if (nestedLatest && (!latest || nestedLatest.mtimeMs > latest.mtimeMs)) {
+        latest = nestedLatest;
+      }
+      continue;
+    }
+    if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+    const entryStat = await stat(entryPath);
+    if (!latest || entryStat.mtimeMs > latest.mtimeMs) {
+      latest = { path: entryPath, mtimeMs: entryStat.mtimeMs };
+    }
+  }
+
+  return latest;
+}
+
+async function readFileTail(filePath: string, maxBytes: number): Promise<string> {
+  const handle = await open(filePath, "r");
+  try {
+    const fileStat = await handle.stat();
+    const length = Math.min(fileStat.size, maxBytes);
+    const position = Math.max(0, fileStat.size - length);
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, position);
+    return buffer.toString("utf8");
+  } finally {
+    await handle.close();
+  }
+}
+
+function parseCodexSessionEvents(raw: string): CodexSessionEvent[] {
+  const events: CodexSessionEvent[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      events.push(JSON.parse(line) as CodexSessionEvent);
+    } catch {
+      // Ignore a partial first line from tail reads.
+    }
+  }
+  return events;
+}
+
+function messageForCodexSessionEvent(event: CodexSessionEvent): string | null {
+  const payload = event.payload;
+  if (!payload) return null;
+  if (payload.type === "function_call") {
+    return payload.name ? `Running ${payload.name}` : "Running a tool";
+  }
+  if (payload.type === "function_call_output") return "Reviewing tool output";
+  if (payload.type === "agent_message") return "Writing response";
+  if (payload.type === "user_message") return "Reading prompt";
+  if (payload.type === "task_started") return "Working";
+  if (payload.type === "task_complete") return "Waiting for next prompt";
+  if (payload.type === "reasoning") return "Thinking";
+  if (payload.type === "message" && payload.role === "assistant") return "Writing response";
+  return null;
+}
+
+function stateForCodexSessionEvent(event: CodexSessionEvent): CodexActivityState | null {
+  const payload = event.payload;
+  if (!payload) return null;
+  if (payload.type === "task_started" || payload.type === "user_message" || payload.type === "reasoning") {
+    return "working";
+  }
+  if (payload.type === "function_call") return "working";
+  if (payload.type === "function_call_output") {
+    if (/Process exited with code [1-9]/.test(payload.output ?? "")) return "error";
+    return "reviewing";
+  }
+  if (payload.type === "agent_message") return "reviewing";
+  if (payload.type === "message" && payload.role === "assistant") return "reviewing";
+  if (payload.type === "task_complete") return "waiting";
+  return null;
+}
+
+async function inferCodexSessionActivity(): Promise<CodexActivity | null> {
+  const latestFiles = await Promise.all(codexSessionSearchRoots().map(findLatestCodexSessionFile));
+  const latestFile = latestFiles
+    .filter((entry): entry is { path: string; mtimeMs: number } => Boolean(entry))
+    .sort((left, right) => right.mtimeMs - left.mtimeMs)[0];
+  if (!latestFile) return null;
+
+  const raw = await readFileTail(latestFile.path, CODEX_SESSION_TAIL_BYTES);
+  const events = parseCodexSessionEvents(raw);
+
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    const state = stateForCodexSessionEvent(event);
+    if (!state) continue;
+
+    const updatedAt = event.timestamp ? Date.parse(event.timestamp) : latestFile.mtimeMs;
+    if (!Number.isFinite(updatedAt) || Date.now() - updatedAt > CODEX_SESSION_ACTIVE_STALE_MS) {
+      return null;
+    }
+
+    return {
+      state,
+      message: messageForCodexSessionEvent(event),
+      updatedAt,
+      path: codexActivityPath(),
+      source: "codex-session"
+    };
+  }
+
+  return null;
+}
+
+async function pollCodexActivity(): Promise<void> {
+  let [stored, inferred] = await Promise.all([
+    readStoredCodexActivity(),
+    inferCodexSessionActivity()
+  ]);
+
+  if (
+    stored?.source === "codex-session" &&
+    stored.updatedAt &&
+    Date.now() - stored.updatedAt > CODEX_SESSION_ACTIVE_STALE_MS
+  ) {
+    stored = null;
+  }
+
+  const next =
+    inferred && (!stored?.updatedAt || inferred.updatedAt! >= stored.updatedAt)
+      ? inferred
+      : stored;
+
+  if (next) {
+    if (next.source === "codex-session") {
+      await writeCodexActivityFile(next);
+    }
+    setCodexActivity(next);
+    return;
+  }
+
+  setCodexActivity({
+    state: "idle",
+    message: null,
+    updatedAt: null,
+    path: codexActivityPath(),
+    source: "manual"
+  });
+}
+
+function scheduleCodexActivityPolling(): void {
+  if (codexActivityTimer) clearInterval(codexActivityTimer);
+  void pollCodexActivity();
+  codexActivityTimer = setInterval(() => void pollCodexActivity(), CODEX_SESSION_POLL_MS);
 }
 
 function setPetFacing(next: PetFacing): void {
@@ -988,6 +1277,21 @@ function triggerDemo(trigger: DemoTrigger): void {
   if (trigger === "hydration") triggerHydrationReminder(true);
   if (trigger === "focusWarning") triggerFocusWarning("Twitter");
   if (trigger === "happy") happyFeedback(pick(text().bubble.woof));
+  if (trigger === "codexIdle") {
+    void writeCodexActivityDemo("idle", null);
+  }
+  if (trigger === "codexWorking") {
+    void writeCodexActivityDemo("working", "Editing files");
+  }
+  if (trigger === "codexReviewing") {
+    void writeCodexActivityDemo("reviewing", "Checking changes");
+  }
+  if (trigger === "codexWaiting") {
+    void writeCodexActivityDemo("waiting", "Waiting for input");
+  }
+  if (trigger === "codexError") {
+    void writeCodexActivityDemo("error", "Something failed");
+  }
 }
 
 function handleBubbleAction(actionId: string): void {
@@ -1134,6 +1438,7 @@ app.whenReady().then(() => {
   createPetWindow();
   createTray();
   registerDisplayChangeHandlers();
+  scheduleCodexActivityPolling();
   scheduleReminderTimers();
   scheduleDistractionDetection();
   if (IS_DEV) {
@@ -1159,6 +1464,7 @@ app.on("before-quit", () => {
     distractionTimer,
     distractionStartupTimer,
     displayChangeTimer,
+    codexActivityTimer,
     bubbleTimer,
     dragTimer,
     dragSafetyTimer

@@ -28,6 +28,7 @@ PawPal 是一个桌面宠物应用，支持 macOS 和 Windows。一只透明、�
 - **休息提醒** — 定时提醒你站起来活动一下，小狗会跑过整个屏幕引起你的注意
 - **喝水提醒** — 别忘了喝水
 - **专注模式** — 检测你当前在用的 app，如果你在刷社交媒体，小狗会来提醒你回去工作
+- **Codex 状态** — 读取 `~/.codex/pawpal/activity.json`，让小狗显示 idle、working、reviewing、waiting、error 状态
 - **多种宠物外观** — 目前有线条小狗和金毛 puppy 两种风格
 - **中文 / English** — 支持中英文切换
 - **本地优先** — 设置和统计数据保存在本地；只有手动检查更新或开启启动时检查更新时才会访问 GitHub Releases
@@ -45,6 +46,15 @@ PawPal 是一个桌面宠物应用，支持 macOS 和 Windows。一只透明、�
 | `PawPal.Setup.x.x.x.exe` | Windows (64-bit) |
 
 > **macOS**：首次打开时可能提示"无法验证开发者"，请在 系统设置 → 隐私与安全性 中允许打开。专注模式的分心检测需要授予 Accessibility 权限。
+>
+> 如果安装包是本地构建后直接分享的版本（没有 Apple Developer ID 签名和 notarization），对方的 Mac 可能会阻止启动。安装到 `/Applications` 后可运行：
+>
+> ```bash
+> xattr -dr com.apple.quarantine /Applications/PawPal.app
+> open /Applications/PawPal.app
+> ```
+>
+> 想让分享给他人的 `.dmg` 双击即开，需要用 Apple Developer ID 证书签名并提交 Apple notarization。
 >
 > **Windows**：分心检测功能暂不可用（目前仅支持 macOS），其他功能正常。
 
@@ -71,6 +81,23 @@ pnpm dist         # 编译 + 打包 macOS 和 Windows
 pnpm dist:mac     # 仅打包 macOS
 pnpm dist:win     # 仅打包 Windows（需要 Wine 或在 Windows 上运行）
 ```
+
+### Codex 状态联动
+
+PawPal 运行时会自动读取 `~/.codex/sessions` 里的 Codex 会话日志，推断 `idle`、`working`、`reviewing`、`waiting`、`error` 状态，并同步写入 `~/.codex/pawpal/activity.json`。
+
+也可以手动写入下面格式来测试桌宠动画：
+
+```json
+{
+  "state": "working",
+  "message": "Editing files",
+  "updatedAt": 1778785200000,
+  "source": "manual"
+}
+```
+
+支持的 `state`：`idle`、`working`、`reviewing`、`waiting`、`error`。
 
 > 本地打包时请确保 `pnpm` 命令可以在 shell 中直接运行；electron-builder 会用它收集依赖。
 
@@ -116,6 +143,7 @@ PawPal is a desktop pet app for macOS and Windows. A transparent, always-on-top 
 - **Break reminders** — timed nudges to get up and move; the dog runs across your screen to get your attention
 - **Hydration reminders** — don't forget to drink water
 - **Focus mode** — detects what app you're using; if you're on social media, the dog will nudge you back to work
+- **Codex activity** — reads `~/.codex/pawpal/activity.json` so the dog can show idle, working, reviewing, waiting, or error states
 - **Multiple pet styles** — line-drawing dog and golden retriever puppy
 - **Chinese / English UI**
 - **Local-first data** — settings and stats stay on your machine; PawPal only contacts GitHub Releases when you manually check for updates or opt in to launch-time checks
@@ -123,6 +151,15 @@ PawPal is a desktop pet app for macOS and Windows. A transparent, always-on-top 
 ### Install
 
 Download the latest installer from [Releases](../../releases) (`.dmg` for macOS, `.exe` for Windows), or run from source:
+
+If you share a locally built macOS `.dmg` without Apple Developer ID signing and notarization, another Mac may block launch. After dragging PawPal to `/Applications`, the recipient can run:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/PawPal.app
+open /Applications/PawPal.app
+```
+
+For a `.dmg` that opens cleanly for other people, sign with an Apple Developer ID certificate and notarize with Apple.
 
 ```bash
 corepack enable
@@ -143,6 +180,23 @@ pnpm test
 pnpm build
 pnpm dist
 ```
+
+Codex activity bridge:
+
+While PawPal is running, it watches Codex session logs under `~/.codex/sessions`, infers `idle`, `working`, `reviewing`, `waiting`, and `error`, and mirrors the current state to `~/.codex/pawpal/activity.json`.
+
+You can still write this shape manually to test the companion:
+
+```json
+{
+  "state": "working",
+  "message": "Editing files",
+  "updatedAt": 1778785200000,
+  "source": "manual"
+}
+```
+
+Supported `state` values: `idle`, `working`, `reviewing`, `waiting`, `error`.
 
 ### License
 

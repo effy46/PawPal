@@ -30,7 +30,13 @@ function demoItems(
     { label: labels.demoBreakReminder, click: () => actions.triggerDemo("break") },
     { label: labels.demoHydrationReminder, click: () => actions.triggerDemo("hydration") },
     { label: labels.demoFocusWarning, click: () => actions.triggerDemo("focusWarning") },
-    { label: labels.demoHappyReaction, click: () => actions.triggerDemo("happy") }
+    { label: labels.demoHappyReaction, click: () => actions.triggerDemo("happy") },
+    { type: "separator" as const },
+    { label: labels.demoCodexIdle, click: () => actions.triggerDemo("codexIdle") },
+    { label: labels.demoCodexWorking, click: () => actions.triggerDemo("codexWorking") },
+    { label: labels.demoCodexReviewing, click: () => actions.triggerDemo("codexReviewing") },
+    { label: labels.demoCodexWaiting, click: () => actions.triggerDemo("codexWaiting") },
+    { label: labels.demoCodexError, click: () => actions.triggerDemo("codexError") }
   ];
 }
 

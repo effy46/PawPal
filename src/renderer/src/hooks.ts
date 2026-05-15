@@ -43,6 +43,13 @@ export function useSnapshot(): AppSnapshot {
     },
     petState: "idle",
     petFacing: "right",
+    codexActivity: {
+      state: "idle",
+      message: null,
+      updatedAt: null,
+      path: "",
+      source: "manual"
+    },
     blockingMode: null,
     focusActive: false,
     dogVisible: true
