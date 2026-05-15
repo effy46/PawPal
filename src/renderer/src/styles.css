@@ -97,7 +97,6 @@ textarea {
 
 .state-sad {
   filter: saturate(0.9);
-  transform: rotate(-2deg);
 }
 
 .state-focusAlert {
@@ -209,22 +208,25 @@ textarea {
 }
 
 .codex-badge {
-  align-items: baseline;
+  align-items: flex-start;
   background: rgba(255, 252, 244, 0.9);
   border: 1px solid rgba(36, 78, 69, 0.16);
-  border-radius: 999px;
-  bottom: 34px;
-  box-shadow: 0 6px 16px rgba(45, 38, 31, 0.12);
+  border-radius: 11px;
+  bottom: 8px;
+  box-shadow: 0 8px 22px rgba(45, 38, 31, 0.12);
   color: #244e45;
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  gap: 1px;
   left: 50%;
-  font-size: 11px;
-  font-weight: 650;
+  font-size: 12px;
+  font-weight: 500;
   letter-spacing: 0;
-  max-width: 168px;
+  line-height: 1.2;
+  min-width: 142px;
+  max-width: 188px;
   overflow: hidden;
-  padding: 4px 8px;
+  padding: 7px 28px 7px 10px;
   pointer-events: auto;
   position: absolute;
   transform: translateX(-50%);
@@ -232,9 +234,51 @@ textarea {
   z-index: 1;
 }
 
-.codex-badge strong {
+.codex-badge span {
   color: #2d261f;
-  font-size: 11px;
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.codex-badge strong {
+  color: #6e6457;
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.codex-badge::after {
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  content: "";
+  height: 8px;
+  opacity: 0.75;
+  position: absolute;
+  right: 10px;
+  top: 11px;
+  width: 8px;
+}
+
+.codex-badge--complete::after {
+  align-items: center;
+  background: #10a37f;
+  border: 0;
+  color: #fff;
+  content: "✓";
+  display: flex;
+  font-size: 8px;
+  font-weight: 700;
+  height: 12px;
+  justify-content: center;
+  line-height: 1;
+  opacity: 1;
+  right: 9px;
+  top: 10px;
+  width: 12px;
 }
 
 .codex-badge--error {
@@ -247,8 +291,181 @@ textarea {
   color: #7b551f;
 }
 
+.codex-badge--complete {
+  border-color: rgba(36, 78, 69, 0.18);
+  color: #244e45;
+}
+
 .codex-badge--waiting {
   color: #6e6457;
+}
+
+.codex-count-badge {
+  align-items: center;
+  background: #dceefd;
+  border: 1px solid rgba(56, 105, 145, 0.14);
+  border-radius: 999px;
+  bottom: 158px;
+  box-shadow: 0 6px 14px rgba(45, 38, 31, 0.12);
+  color: #2d4d64;
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  font-weight: 650;
+  height: 30px;
+  justify-content: center;
+  letter-spacing: 0;
+  min-width: 30px;
+  padding: 0 9px;
+  pointer-events: auto;
+  position: absolute;
+  right: 42px;
+  top: auto;
+  z-index: 2;
+}
+
+.codex-count-badge--waiting {
+  background: #fff3d8;
+  color: #70551d;
+}
+
+.codex-count-badge--error {
+  background: #f8dfd7;
+  color: #8d3f29;
+}
+
+.codex-count-badge--reviewing,
+.codex-count-badge--complete {
+  background: #e9f2dc;
+  color: #476223;
+}
+
+.codex-chat-stack {
+  bottom: 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  left: 50%;
+  max-height: 186px;
+  overflow: hidden;
+  pointer-events: auto;
+  position: absolute;
+  transform: translateX(-50%);
+  width: 216px;
+  z-index: 3;
+}
+
+.codex-chat-stack__collapse {
+  align-items: center;
+  align-self: flex-end;
+  background: rgba(245, 245, 245, 0.92);
+  border: 1px solid rgba(45, 38, 31, 0.08);
+  border-radius: 999px;
+  color: #7a756f;
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  height: 28px;
+  justify-content: center;
+  line-height: 1;
+  order: 2;
+  width: 28px;
+}
+
+.codex-chat-card {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(36, 78, 69, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(45, 38, 31, 0.1);
+  color: #2d261f;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 12px;
+  line-height: 1.24;
+  padding: 9px 10px 9px 12px;
+  position: relative;
+}
+
+.codex-chat-card::after {
+  align-self: start;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  content: "";
+  grid-column: 2;
+  height: 8px;
+  margin-top: 2px;
+  opacity: 0.75;
+  width: 8px;
+}
+
+.codex-chat-card span {
+  font-size: 13px;
+  font-weight: 700;
+  grid-column: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codex-chat-card strong,
+.codex-chat-card p {
+  color: #6e6457;
+  font-size: 12px;
+  font-weight: 500;
+  grid-column: 1 / -1;
+  margin: 2px 18px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codex-chat-card p {
+  margin-top: 1px;
+}
+
+.codex-chat-card--waiting {
+  color: #70551d;
+}
+
+.codex-chat-card--error {
+  border-color: rgba(168, 70, 45, 0.18);
+  color: #a8462d;
+}
+
+.codex-chat-card--reviewing {
+  border-color: rgba(182, 125, 58, 0.18);
+  color: #7b551f;
+}
+
+.codex-chat-card--complete {
+  color: #244e45;
+}
+
+.codex-chat-card--complete::after {
+  align-items: center;
+  background: #10a37f;
+  border: 0;
+  color: #fff;
+  content: "✓";
+  display: flex;
+  font-size: 8px;
+  font-weight: 700;
+  height: 12px;
+  justify-content: center;
+  line-height: 1;
+  opacity: 1;
+  width: 12px;
+}
+
+.codex-chat-more {
+  align-self: center;
+  background: rgba(255, 252, 244, 0.92);
+  border: 1px solid rgba(45, 38, 31, 0.08);
+  border-radius: 999px;
+  color: #6e6457;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 5px 10px;
 }
 
 .prefs {
@@ -436,7 +653,7 @@ textarea {
 .prefs__group {
   column-gap: 14px;
   display: grid;
-  grid-template-columns: 60px minmax(0, 1fr);
+  grid-template-columns: 92px minmax(0, 1fr);
   padding: 18px 0 10px;
 }
 
@@ -1293,30 +1510,30 @@ textarea {
 @keyframes pet-knock {
   0%,
   100% {
-    transform: translateX(0) rotate(0);
+    transform: translateX(0);
   }
   50% {
-    transform: translateX(-7px) rotate(-3deg);
+    transform: translateX(-7px);
   }
 }
 
 @keyframes pet-beg {
   0%,
   100% {
-    transform: translateY(0) rotate(0);
+    transform: translateY(0);
   }
   50% {
-    transform: translateY(4px) rotate(1deg);
+    transform: translateY(4px);
   }
 }
 
 @keyframes pet-drink {
   0%,
   100% {
-    transform: rotate(0);
+    transform: translateY(0);
   }
   50% {
-    transform: rotate(2deg);
+    transform: translateY(2px);
   }
 }
 

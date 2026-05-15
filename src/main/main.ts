@@ -26,6 +26,7 @@ import type {
   AppSnapshot,
   BlockingMode,
   CodexActivity,
+  CodexActivitySession,
   CodexActivityState,
   CustomPetAsset,
   DistractionStatus,
@@ -154,6 +155,10 @@ function codexSessionsRoot(): string {
   return join(app.getPath("home"), ".codex", "sessions");
 }
 
+function codexSessionIndexPath(): string {
+  return join(app.getPath("home"), ".codex", "session_index.jsonl");
+}
+
 function codexSessionSearchRoots(): string[] {
   return Array.from({ length: 7 }, (_unused, offset) => {
     const date = new Date(Date.now() - offset * 24 * 60 * 60 * 1000);
@@ -171,25 +176,35 @@ let codexActivity: CodexActivity = {
   message: null,
   updatedAt: null,
   path: codexActivityPath(),
-  source: "manual"
+  source: "manual",
+  sessions: []
 };
 
 const CODEX_SESSION_TAIL_BYTES = 256 * 1024;
 const CODEX_SESSION_ACTIVE_STALE_MS = 10 * 60 * 1000;
+const CODEX_SESSION_ACTIVE_WINDOW_MS = 60 * 1000;
+const CODEX_SESSION_READY_WINDOW_MS = 3 * 1000;
 const CODEX_SESSION_POLL_MS = 1000;
 
 type CodexSessionEvent = {
   timestamp?: string;
   type?: string;
   payload?: {
+    id?: string;
     type?: string;
     name?: string;
     role?: string;
     message?: string;
     last_agent_message?: string;
     output?: string;
+    cwd?: string;
+    turn_id?: string;
   };
 };
+
+function codexActivityFreshMs(state: CodexActivityState): number {
+  return state === "complete" ? CODEX_SESSION_READY_WINDOW_MS : CODEX_SESSION_ACTIVE_WINDOW_MS;
+}
 
 function setPetMouseInteractive(interactive: boolean): void {
   if (!petWindow || petWindow.isDestroyed() || petMouseInteractive === interactive) return;
@@ -331,6 +346,7 @@ function isCodexActivityState(value: unknown): value is CodexActivityState {
     value === "idle" ||
     value === "working" ||
     value === "reviewing" ||
+    value === "complete" ||
     value === "waiting" ||
     value === "error"
   );
@@ -339,16 +355,32 @@ function isCodexActivityState(value: unknown): value is CodexActivityState {
 function normalizeCodexActivity(value: unknown): CodexActivity {
   const path = codexActivityPath();
   if (!value || typeof value !== "object") {
-    return { state: "idle", message: null, updatedAt: null, path, source: "manual" };
+    return { state: "idle", message: null, updatedAt: null, path, source: "manual", sessions: [] };
   }
   const source = value as Partial<CodexActivity>;
   const state = isCodexActivityState(source.state) ? source.state : "idle";
+  const sessions = Array.isArray(source.sessions)
+    ? source.sessions
+        .filter((session): session is CodexActivitySession => {
+          if (!session || typeof session !== "object") return false;
+          const candidate = session as Partial<CodexActivitySession>;
+          return (
+            typeof candidate.id === "string" &&
+            typeof candidate.title === "string" &&
+            isCodexActivityState(candidate.state) &&
+            typeof candidate.updatedAt === "number" &&
+            typeof candidate.path === "string"
+          );
+        })
+        .slice(0, 5)
+    : [];
   return {
     state,
     message: typeof source.message === "string" && source.message.trim() ? source.message.trim() : null,
     updatedAt: typeof source.updatedAt === "number" ? source.updatedAt : Date.now(),
     path,
-    source: source.source === "codex-session" ? "codex-session" : "manual"
+    source: source.source === "codex-session" ? "codex-session" : "manual",
+    sessions
   };
 }
 
@@ -358,7 +390,8 @@ function setCodexActivity(next: CodexActivity): void {
     codexActivity.message !== next.message ||
     codexActivity.updatedAt !== next.updatedAt ||
     codexActivity.path !== next.path ||
-    codexActivity.source !== next.source;
+    codexActivity.source !== next.source ||
+    JSON.stringify(codexActivity.sessions) !== JSON.stringify(next.sessions);
   if (!changed) return;
   codexActivity = next;
   publishSnapshot();
@@ -376,7 +409,8 @@ async function readStoredCodexActivity(): Promise<CodexActivity | null> {
       message: error instanceof Error ? error.message : String(error),
       updatedAt: Date.now(),
       path: codexActivityPath(),
-      source: "manual"
+      source: "manual",
+      sessions: []
     };
   }
 }
@@ -393,7 +427,8 @@ async function writeCodexActivityDemo(state: CodexActivityState, message: string
     message,
     updatedAt: Date.now(),
     path: codexActivityPath(),
-    source: "manual"
+    source: "manual",
+    sessions: []
   };
   await writeCodexActivityFile(next);
   setCodexActivity(next);
@@ -427,6 +462,28 @@ async function findLatestCodexSessionFile(directory: string): Promise<{ path: st
   return latest;
 }
 
+async function findCodexSessionFiles(directory: string): Promise<Array<{ path: string; mtimeMs: number }>> {
+  let entries: Dirent[];
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const files: Array<{ path: string; mtimeMs: number }> = [];
+  for (const entry of entries) {
+    const entryPath = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await findCodexSessionFiles(entryPath)));
+      continue;
+    }
+    if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+    const entryStat = await stat(entryPath);
+    files.push({ path: entryPath, mtimeMs: entryStat.mtimeMs });
+  }
+  return files;
+}
+
 async function readFileTail(filePath: string, maxBytes: number): Promise<string> {
   const handle = await open(filePath, "r");
   try {
@@ -439,6 +496,40 @@ async function readFileTail(filePath: string, maxBytes: number): Promise<string>
   } finally {
     await handle.close();
   }
+}
+
+async function readFileHead(filePath: string, maxBytes: number): Promise<string> {
+  const handle = await open(filePath, "r");
+  try {
+    const fileStat = await handle.stat();
+    const length = Math.min(fileStat.size, maxBytes);
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, 0);
+    return buffer.toString("utf8");
+  } finally {
+    await handle.close();
+  }
+}
+
+async function readCodexSessionTitles(): Promise<Map<string, string>> {
+  const titles = new Map<string, string>();
+  try {
+    const raw = await readFile(codexSessionIndexPath(), "utf8");
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const record = JSON.parse(line) as { id?: unknown; thread_name?: unknown };
+        if (typeof record.id === "string" && typeof record.thread_name === "string") {
+          titles.set(record.id, record.thread_name);
+        }
+      } catch {
+        // Ignore partial/corrupt index lines.
+      }
+    }
+  } catch {
+    return titles;
+  }
+  return titles;
 }
 
 function parseCodexSessionEvents(raw: string): CodexSessionEvent[] {
@@ -457,6 +548,9 @@ function parseCodexSessionEvents(raw: string): CodexSessionEvent[] {
 function messageForCodexSessionEvent(event: CodexSessionEvent): string | null {
   const payload = event.payload;
   if (!payload) return null;
+  if (payload.type === "function_call" && payload.name === "request_user_input") {
+    return "Needs your reply";
+  }
   if (payload.type === "function_call") {
     return payload.name ? `Running ${payload.name}` : "Running a tool";
   }
@@ -470,9 +564,17 @@ function messageForCodexSessionEvent(event: CodexSessionEvent): string | null {
   return null;
 }
 
+function messageNeedsReply(message: string | null | undefined): boolean {
+  if (!message) return false;
+  return /(\?|please|could you|can you|do you want|would you|which|what|how|send|share|confirm|approve|pick|choose|let me know|need your|waiting for you)/i.test(
+    message
+  );
+}
+
 function stateForCodexSessionEvent(event: CodexSessionEvent): CodexActivityState | null {
   const payload = event.payload;
   if (!payload) return null;
+  if (payload.type === "function_call" && payload.name === "request_user_input") return "waiting";
   if (payload.type === "task_started" || payload.type === "user_message" || payload.type === "reasoning") {
     return "working";
   }
@@ -483,18 +585,48 @@ function stateForCodexSessionEvent(event: CodexSessionEvent): CodexActivityState
   }
   if (payload.type === "agent_message") return "reviewing";
   if (payload.type === "message" && payload.role === "assistant") return "reviewing";
-  if (payload.type === "task_complete") return "waiting";
+  if (payload.type === "task_complete") return "complete";
   return null;
 }
 
-async function inferCodexSessionActivity(): Promise<CodexActivity | null> {
-  const latestFiles = await Promise.all(codexSessionSearchRoots().map(findLatestCodexSessionFile));
-  const latestFile = latestFiles
-    .filter((entry): entry is { path: string; mtimeMs: number } => Boolean(entry))
-    .sort((left, right) => right.mtimeMs - left.mtimeMs)[0];
-  if (!latestFile) return null;
+function titleForCodexSession(
+  events: CodexSessionEvent[],
+  filePath: string,
+  sessionId: string,
+  titleMap: Map<string, string>
+): string {
+  const indexedTitle = titleMap.get(sessionId);
+  if (indexedTitle) return indexedTitle;
 
-  const raw = await readFileTail(latestFile.path, CODEX_SESSION_TAIL_BYTES);
+  for (let index = 0; index < events.length; index += 1) {
+    const payload = events[index].payload;
+    if (payload?.type !== "user_message") continue;
+    const message = payload.message?.replace(/\s+/g, " ").trim();
+    if (message) return message.length > 48 ? `${message.slice(0, 45)}...` : message;
+  }
+
+  for (const event of events) {
+    const cwd = event.payload?.cwd?.trim();
+    if (cwd) return basename(cwd);
+  }
+
+  return basename(filePath, extname(filePath));
+}
+
+function idForCodexSession(events: CodexSessionEvent[], filePath: string): string {
+  const meta = events.find((event) => event.type === "session_meta" && event.payload?.id);
+  return meta?.payload?.id ?? basename(filePath, extname(filePath));
+}
+
+async function inferCodexSessionFileActivity(file: {
+  path: string;
+  mtimeMs: number;
+}, titleMap: Map<string, string>): Promise<CodexActivitySession | null> {
+  const [head, tail] = await Promise.all([
+    readFileHead(file.path, 64 * 1024),
+    readFileTail(file.path, CODEX_SESSION_TAIL_BYTES)
+  ]);
+  const raw = `${head}\n${tail}`;
   const events = parseCodexSessionEvents(raw);
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
@@ -502,21 +634,127 @@ async function inferCodexSessionActivity(): Promise<CodexActivity | null> {
     const state = stateForCodexSessionEvent(event);
     if (!state) continue;
 
-    const updatedAt = event.timestamp ? Date.parse(event.timestamp) : latestFile.mtimeMs;
-    if (!Number.isFinite(updatedAt) || Date.now() - updatedAt > CODEX_SESSION_ACTIVE_STALE_MS) {
-      return null;
-    }
+    const updatedAt = event.timestamp ? Date.parse(event.timestamp) : file.mtimeMs;
+    if (!Number.isFinite(updatedAt)) return null;
 
+    if (Date.now() - updatedAt > codexActivityFreshMs(state)) return null;
+
+    const id = idForCodexSession(events, file.path);
     return {
+      id,
+      title: titleForCodexSession(events, file.path, id, titleMap),
       state,
       message: messageForCodexSessionEvent(event),
       updatedAt,
-      path: codexActivityPath(),
-      source: "codex-session"
+      path: file.path
     };
   }
 
   return null;
+}
+
+function aggregateCodexSessionActivity(sessions: CodexActivitySession[]): CodexActivity {
+  const waiting = sessions.filter((session) => session.state === "waiting");
+  const visibleSessions = [...sessions]
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, 5);
+  const topWaiting = waiting.sort((left, right) => right.updatedAt - left.updatedAt)[0];
+  if (topWaiting) {
+    return {
+      state: "waiting",
+      message:
+        waiting.length === 1
+          ? `Reply needed: ${topWaiting.title}`
+          : `${waiting.length} chats need your reply`,
+      updatedAt: topWaiting.updatedAt,
+      path: codexActivityPath(),
+      source: "codex-session",
+      sessions: visibleSessions
+    };
+  }
+
+  const topError = visibleSessions.find((session) => session.state === "error");
+  if (topError) {
+    return {
+      state: "error",
+      message: `Blocked: ${topError.title}`,
+      updatedAt: topError.updatedAt,
+      path: codexActivityPath(),
+      source: "codex-session",
+      sessions: visibleSessions
+    };
+  }
+
+  const activeSessions = visibleSessions.filter(
+    (session) => session.state === "working" || session.state === "reviewing"
+  );
+  const topActive = activeSessions[0];
+  if (topActive) {
+    return {
+      state: topActive.state,
+      message:
+        activeSessions.length === 1
+          ? topActive.message
+            ? `${topActive.title}: ${topActive.message}`
+            : topActive.title
+          : `${activeSessions.length} chats active`,
+      updatedAt: topActive.updatedAt,
+      path: codexActivityPath(),
+      source: "codex-session",
+      sessions: visibleSessions
+    };
+  }
+
+  const latestComplete = visibleSessions.find((session) => session.state === "complete");
+  if (latestComplete) {
+    return {
+      state: "complete",
+      message:
+        visibleSessions.length === 1
+          ? `Ready: ${latestComplete.title}`
+          : `${visibleSessions.length} chats ready`,
+      updatedAt: latestComplete.updatedAt,
+      path: codexActivityPath(),
+      source: "codex-session",
+      sessions: visibleSessions
+    };
+  }
+
+  const latest = visibleSessions[0];
+  if (latest) {
+    return {
+      state: latest.state,
+      message: latest.message ? `${latest.title}: ${latest.message}` : latest.title,
+      updatedAt: latest.updatedAt,
+      path: codexActivityPath(),
+      source: "codex-session",
+      sessions: visibleSessions
+    };
+  }
+
+  return {
+    state: "idle",
+    message: null,
+    updatedAt: null,
+    path: codexActivityPath(),
+    source: "manual",
+    sessions: []
+  };
+}
+
+async function inferCodexSessionActivity(): Promise<CodexActivity | null> {
+  const files = (await Promise.all(codexSessionSearchRoots().map(findCodexSessionFiles)))
+    .flat()
+    .filter((file) => Date.now() - file.mtimeMs <= CODEX_SESSION_ACTIVE_WINDOW_MS)
+    .sort((left, right) => right.mtimeMs - left.mtimeMs)
+    .slice(0, 50);
+  if (!files.length) return null;
+
+  const titleMap = await readCodexSessionTitles();
+  const sessions = (await Promise.all(files.map((file) => inferCodexSessionFileActivity(file, titleMap))))
+    .filter((session): session is CodexActivitySession => Boolean(session));
+  if (!sessions.length) return null;
+  return aggregateCodexSessionActivity(sessions);
 }
 
 async function pollCodexActivity(): Promise<void> {
@@ -528,13 +766,14 @@ async function pollCodexActivity(): Promise<void> {
   if (
     stored?.source === "codex-session" &&
     stored.updatedAt &&
-    Date.now() - stored.updatedAt > CODEX_SESSION_ACTIVE_STALE_MS
+    Date.now() - stored.updatedAt > codexActivityFreshMs(stored.state)
   ) {
     stored = null;
   }
 
   const next =
-    inferred && (!stored?.updatedAt || inferred.updatedAt! >= stored.updatedAt)
+    inferred &&
+    (stored?.source === "codex-session" || !stored?.updatedAt || inferred.updatedAt! >= stored.updatedAt)
       ? inferred
       : stored;
 
@@ -551,7 +790,8 @@ async function pollCodexActivity(): Promise<void> {
     message: null,
     updatedAt: null,
     path: codexActivityPath(),
-    source: "manual"
+    source: "manual",
+    sessions: []
   });
 }
 
