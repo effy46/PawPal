@@ -32,6 +32,9 @@ const api = {
   petDragStart: (offset: { offsetX: number; offsetY: number }): void =>
     ipcRenderer.send("pet:drag-start", offset),
   petDragStop: (): void => ipcRenderer.send("pet:drag-stop"),
+  petResizeStart: (): void => ipcRenderer.send("pet:resize-start"),
+  petResizeStop: (): void => ipcRenderer.send("pet:resize-stop"),
+  openCodexSession: (sessionId: string): void => ipcRenderer.send("codex:open-session", sessionId),
   setMouseInteractive: (interactive: boolean): void =>
     ipcRenderer.send("pet:set-mouse-interactive", interactive),
   bubbleAction: (actionId: string): void => ipcRenderer.send("bubble:action", actionId),

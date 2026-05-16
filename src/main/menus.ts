@@ -71,7 +71,7 @@ export function buildApplicationMenuTemplate(
       submenu: [
         ...actionItems(labels, state, actions),
         { type: "separator" },
-        { role: "quit", label: labels.quit }
+        { label: labels.quit, accelerator: "CommandOrControl+Q", click: actions.quit }
       ]
     },
     { role: "editMenu" },
@@ -112,6 +112,10 @@ export function buildPetContextMenuTemplate(
     {
       label: labels.hideDog,
       click: actions.hideDog
+    },
+    {
+      label: labels.quit,
+      click: actions.quit
     }
   ];
 }

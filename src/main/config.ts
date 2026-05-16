@@ -10,8 +10,16 @@ export const RELEASES_API_URL = "https://api.github.com/repos/zebangeth/PawPal/r
 export const RELEASES_URL = "https://github.com/zebangeth/PawPal/releases";
 
 export const PET_WINDOW = {
-  width: 220,
-  height: 340
+  width: 360,
+  height: 390
+} as const;
+
+export const PET_WINDOW_TRANSPARENT_SIDE_GAP = 88;
+
+export const PET_SCALE = {
+  default: 1,
+  min: 0.65,
+  max: 1.8
 } as const;
 
 export const SETTINGS_WINDOW = {

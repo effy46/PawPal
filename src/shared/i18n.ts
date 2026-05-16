@@ -164,7 +164,8 @@ export const I18N = {
         focusAlert: "分心提醒",
         focusDone: "专注完成",
         sad: "难过",
-        sleeping: "睡觉"
+        sleeping: "睡觉",
+        quitRunning: "离开"
       },
       petStateDescriptions: {
         idle: "没有提醒或专注任务时显示",
@@ -180,7 +181,8 @@ export const I18N = {
         focusAlert: "专注时命中分心规则显示",
         focusDone: "专注计时完成后显示",
         sad: "拒绝或忽略提醒时显示",
-        sleeping: "长时间安静或休息状态显示"
+        sleeping: "长时间安静或休息状态显示",
+        quitRunning: "离开时显示"
       },
       reminders: "提醒",
       enableBreakReminder: "开启休息提醒",
@@ -424,7 +426,8 @@ export const I18N = {
         focusAlert: "Focus Alert",
         focusDone: "Focus Done",
         sad: "Sad",
-        sleeping: "Sleeping"
+        sleeping: "Sleeping",
+        quitRunning: "Exit"
       },
       petStateDescriptions: {
         idle: "Shown when no reminder or focus task is active",
@@ -440,7 +443,8 @@ export const I18N = {
         focusAlert: "Shown when a blocked app or keyword is detected",
         focusDone: "Shown after a focus session completes",
         sad: "Shown after reminders are refused or ignored",
-        sleeping: "Shown during quiet or resting moments"
+        sleeping: "Shown during quiet or resting moments",
+        quitRunning: "Shown while exiting"
       },
       reminders: "Reminders",
       enableBreakReminder: "Enable Break Reminder",

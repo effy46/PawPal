@@ -5,27 +5,13 @@ import {
   getCustomPetAssetDefinition,
   getPetAssetDefinition,
   hasRequiredCustomPetAssets,
+  PET_STATE_ORDER,
   petAppearanceOptions,
   resolvePetAppearanceId
 } from "../src/shared/petAppearances";
 import type { CustomPetAppearance, PetAppearanceId, PetState } from "../src/shared/types";
 
-const petStates: PetState[] = [
-  "idle",
-  "sitting",
-  "happy",
-  "breakPrompt",
-  "breakRunning",
-  "breakDone",
-  "hydrationPrompt",
-  "drinking",
-  "hydrationDone",
-  "focusGuard",
-  "focusAlert",
-  "focusDone",
-  "sad",
-  "sleeping"
-];
+const petStates: PetState[] = PET_STATE_ORDER;
 
 function pathsFor(appearanceId: PetAppearanceId, state: PetState): string[] {
   const asset = getPetAssetDefinition(appearanceId, state);

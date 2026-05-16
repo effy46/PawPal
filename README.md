@@ -23,13 +23,18 @@
 
 PawPal is a desktop pet app for macOS and Windows. A transparent, always-on-top dog lives on your screen and gently reminds you to take breaks, drink water, and stay focused.
 
+> Design note: I personally love Line Dog, so new updates are designed around the Line Dog style, including new actions, thought bubbles, and text styling.
+
 ### Features
 
 - **Break reminders** — timed nudges to get up and move; the dog can run across your screen to get your attention
 - **Hydration reminders** — gentle prompts to drink water
 - **Focus mode** — detects your active app; if you drift into social media, the dog nudges you back to work
-- **Codex activity** — watches Codex session logs, summarizes multiple active chats, and shows idle, working, reviewing, complete, waiting, or error states
-- **Multiple pet styles** — currently includes a line-drawing dog and a golden retriever puppy
+- **Codex activity** — watches Codex session logs, summarizes active chats, detects plan-ready waits, shows hover details in a manga-style thought bubble, expands multi-chat status on click, and opens the matching Codex chat on double-click
+- **Resizable desktop pet** — hover the lower-right corner of the pet window to reveal a resize handle, then drag to make PawPal bigger or smaller
+- **Multiple pet styles** — includes Line Dog, Golden Puppy, Xiao Ji Mao, and custom GIF uploads for each pet state
+- **Settings dashboard** — tracks today's breaks, waters, focus minutes, and distraction warnings, with runtime diagnostics for Codex and focus detection
+- **System controls** — launch-at-login, manual or startup update checks, configurable reminder timing, blocked apps, and blocked keywords
 - **Chinese / English UI**
 - **Local-first data** — settings and stats stay on your machine; PawPal only contacts GitHub Releases when you check for updates manually or enable update checks on launch
 
@@ -118,7 +123,7 @@ pnpm dist:win     # package Windows only; on macOS this may require Wine
 
 While PawPal is running, it watches Codex session logs under `~/.codex/sessions`, infers `idle`, `working`, `reviewing`, `complete`, `waiting`, and `error`, and mirrors the current state to `~/.codex/pawpal/activity.json`.
 
-When multiple Codex chats are active, PawPal first shows a small count badge. Click it to expand separate status cards for each chat. Break, hydration, and focus reminders always take priority over Codex status UI.
+When Codex is active, PawPal shows a compact status badge. Hover the badge to see the highest-priority chat and its latest message in a manga-style thought bubble. Double-click the badge, thought bubble, or an expanded chat card to open the matching Codex chat. When multiple chats are active, the badge shows the active count; click it to expand separate status cards for each chat. Plan implementation requests show as `Needs Input`, and `Ready` stays visible briefly while the pet settles back to idle. Break, hydration, and focus reminders always take priority over Codex status UI.
 
 You can still write this shape manually to test the companion:
 
@@ -153,10 +158,12 @@ pet_assets/     Pet animation assets (GIF)
 
 ### Roadmap
 
-- [ ] More pet styles
+- [ ] More built-in pet styles
 - [ ] Sound effects
 - [ ] Windows distraction detection
-- [ ] Better multi-display support
+- [ ] Slack linkage
+- [ ] More Codex status controls
+- [ ] Rich Codex activity subtitles for file reads, file lists, searches, file edits, tool calls, and web searches
 
 ### License
 
@@ -168,13 +175,18 @@ Source code is released under the [MIT License](LICENSE). Pet animation assets h
 
 PawPal 是一款支持 macOS 和 Windows 的桌面宠物应用。一只透明、始终置顶的小狗会陪在屏幕上，提醒你休息、喝水，并帮助你保持专注。
 
+> 设计说明：因为我本人喜欢线条小狗，所以所有更新都是围绕线条小狗来制作的，包括新动作、思考内容泡泡🫧和文字 style。
+
 ### 功能
 
 - **休息提醒** — 按设定时间提醒你站起来活动；小狗可以跑过屏幕来吸引注意
 - **喝水提醒** — 温和提醒你补充水分
 - **专注模式** — 检测当前使用的应用；如果你切到社交媒体，小狗会提醒你回到工作状态
-- **Codex 状态** — 自动读取 Codex 会话日志，汇总多个活跃聊天，并显示 idle、working、reviewing、complete、waiting、error 状态
-- **多种宠物外观** — 目前包含线条小狗和金毛幼犬两种风格
+- **Codex 状态** — 自动读取 Codex 会话日志，汇总活跃聊天，识别等待执行计划的状态，用漫画风思考泡泡显示悬停详情，可点击展开多个聊天状态，并可双击跳转到对应 Codex 聊天
+- **桌宠大小调整** — 鼠标移到宠物窗口右下角会出现调整手柄，拖动即可放大或缩小 PawPal
+- **多种宠物外观** — 包含线条小狗、金毛 puppy、小鸡毛，也支持为每个宠物状态上传自定义 GIF
+- **设置仪表盘** — 记录当天休息、喝水、专注分钟和分心提醒次数，并提供 Codex 与专注检测运行诊断
+- **系统控制** — 支持开机自启、手动或启动时检查更新、提醒时间配置、分心应用和关键词配置
 - **中文 / English 界面**
 - **本地优先** — 设置和统计数据保存在本机；只有手动检查更新或开启启动时检查更新时，PawPal 才会访问 GitHub Releases
 
@@ -263,7 +275,7 @@ pnpm dist:win     # 仅打包 Windows；在 macOS 上可能需要 Wine
 
 PawPal 运行时会自动读取 `~/.codex/sessions` 里的 Codex 会话日志，推断 `idle`、`working`、`reviewing`、`complete`、`waiting`、`error` 状态，并同步写入 `~/.codex/pawpal/activity.json`。
 
-当多个 Codex 聊天同时活跃时，PawPal 会先显示一个数量徽标；点击徽标可以展开每个聊天的独立状态卡片。休息、喝水和专注提醒始终优先于 Codex 状态界面。
+Codex 活跃时，PawPal 会显示一个简洁的状态徽标。鼠标悬停在徽标上，可以通过漫画风思考泡泡查看当前最重要的聊天和最新动态。双击状态徽标、思考泡泡或展开后的聊天卡片，即可打开对应的 Codex 聊天。如果多个 Codex 聊天同时活跃，徽标会显示数量；点击后可以展开每个聊天的独立状态卡片。等待执行的计划会显示为 `Needs Input`；`Ready` 会短暂保留，随后让宠物回到待机动画。休息、喝水和专注提醒始终优先于 Codex 状态界面。
 
 你也可以手动写入下面的内容来测试桌宠动画：
 
@@ -298,10 +310,12 @@ pet_assets/     宠物动画素材（GIF）
 
 ### 开发路线
 
-- [ ] 更多宠物外观
+- [ ] 更多内置宠物外观
 - [ ] 声音效果
 - [ ] Windows 分心检测
-- [ ] 优化多显示器支持
+- [ ] Slack 联动
+- [ ] 更多 Codex 状态控制
+- [ ] 更丰富的 Codex 活动副标题：读文件、列文件、搜索、改文件、调用工具和网页搜索
 
 ### 许可
 

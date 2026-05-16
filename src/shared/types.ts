@@ -40,7 +40,8 @@ export type PetState =
   | "focusAlert"
   | "focusDone"
   | "sad"
-  | "sleeping";
+  | "sleeping"
+  | "quitRunning";
 
 export type CustomPetAsset = {
   relativePath: string;
@@ -123,6 +124,7 @@ export type AppSnapshot = {
   distraction: DistractionStatus;
   petState: PetState;
   petFacing: PetFacing;
+  petScale: number;
   codexActivity: CodexActivity;
   blockingMode: BlockingMode;
   focusActive: boolean;

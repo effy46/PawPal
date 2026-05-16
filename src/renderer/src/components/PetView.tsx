@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { JSX, PointerEvent } from "react";
+import type { CSSProperties, JSX, MouseEvent as ReactMouseEvent, PointerEvent } from "react";
 import { i18n, resolveLanguage } from "../../../shared/i18n";
 import type { CodexActivity, CodexActivityState, PetState, SpeechBubble } from "../../../shared/types";
 import { getPetAsset, getPetAssetVariantCount } from "../assets";
@@ -17,14 +17,18 @@ const CONTINUOUS_ASSET_STATES = new Set<PetState>(["idle", "focusGuard"]);
 const CONTINUOUS_ASSET_ROTATION_MS = 15 * 60 * 1000;
 const DRAG_START_DISTANCE_PX = 10;
 const PET_BUTTON_SELECTOR = ".pet-button";
-const BUBBLE_INTERACTIVE_SELECTOR = ".speech-bubble, .codex-count-badge, .codex-chat-stack";
-const MAX_EXPANDED_CODEX_SESSIONS = 2;
+const CODEX_INTERACTIVE_SELECTOR =
+  ".codex-badge, .codex-count-badge, .codex-chat-stack, .codex-detail-popover";
+const BUBBLE_INTERACTIVE_SELECTOR = `.speech-bubble, ${CODEX_INTERACTIVE_SELECTOR}`;
+const MAX_EXPANDED_CODEX_SESSIONS = 3;
+const CODEX_STACK_SCROLL_STEP = 2;
+const CODEX_COMPLETE_CELEBRATION_MS = 3200;
 
 const CODEX_STATE_TO_PET_STATE: Record<CodexActivityState, PetState> = {
   idle: "idle",
   working: "focusGuard",
   reviewing: "focusAlert",
-  complete: "happy",
+  complete: "focusDone",
   waiting: "sitting",
   error: "sad"
 };
@@ -74,6 +78,21 @@ function codexSessionMessage(message: string | null): string | null {
   return message.replace(/^(Ready|Reply needed|Blocked):\s*/i, "");
 }
 
+function codexActivityDetail(activity: CodexActivity): string | null {
+  if (activity.message) return codexSessionMessage(activity.message);
+  const session = activity.sessions[0];
+  return codexSessionMessage(session?.message ?? null);
+}
+
+function codexPrimarySession(activity: CodexActivity): CodexActivity["sessions"][number] | null {
+  return (
+    activity.sessions.find((session) => session.state === "waiting" || session.state === "error") ??
+    activity.sessions.find((session) => session.state === "working" || session.state === "reviewing") ??
+    activity.sessions[0] ??
+    null
+  );
+}
+
 function randomVariant(count: number, previous?: number): number {
   if (count <= 1) return 0;
   let next = Math.floor(Math.random() * count);
@@ -99,10 +118,16 @@ export function PetView(): JSX.Element {
   const [assetReplayKey, setAssetReplayKey] = useState(0);
   const [stateSignal, setStateSignal] = useState(0);
   const [codexExpanded, setCodexExpanded] = useState(false);
+  const [codexDetailsOpen, setCodexDetailsOpen] = useState(false);
+  const [codexDetailSessionId, setCodexDetailSessionId] = useState<string | null>(null);
+  const [codexStackStartIndex, setCodexStackStartIndex] = useState(0);
+  const [resizeHotspot, setResizeHotspot] = useState(false);
+  const [resizeHandlePoint, setResizeHandlePoint] = useState<{ left: number; top: number } | null>(null);
   const dragRef = useRef<DragRef | null>(null);
+  const shellRef = useRef<HTMLElement | null>(null);
+  const petButtonRef = useRef<HTMLButtonElement | null>(null);
   const mouseInteractiveRef = useRef<boolean | null>(null);
   const lastMousePointRef = useRef<{ x: number; y: number } | null>(null);
-  const bubbleVisibleRef = useRef(false);
   const labels = i18n(resolveLanguage(snapshot.settings.language)).settings;
 
   useEffect(() => {
@@ -117,19 +142,65 @@ export function PetView(): JSX.Element {
   }, []);
 
   const codexState = snapshot.codexActivity.state;
-  const showCodexActivity = !bubble && !snapshot.blockingMode && codexState !== "idle";
+  const showCodexActivity =
+    snapshot.petState !== "quitRunning" && !bubble && !snapshot.blockingMode && codexState !== "idle";
   const showCodexMulti = showCodexActivity && snapshot.codexActivity.sessions.length > 1;
-  const state = showCodexActivity ? CODEX_STATE_TO_PET_STATE[codexState] : snapshot.petState;
+  const codexPetState = CODEX_STATE_TO_PET_STATE[codexState];
+  const codexCompleteAgeMs =
+    typeof snapshot.codexActivity.updatedAt === "number" ? now - snapshot.codexActivity.updatedAt : 0;
+  const settledCodexPetState =
+    codexState === "complete" && codexCompleteAgeMs > CODEX_COMPLETE_CELEBRATION_MS
+      ? "idle"
+      : codexPetState;
+  const state = showCodexActivity ? settledCodexPetState : snapshot.petState;
   const altText = `PawPal ${state}`;
-  const facingClass = snapshot.petFacing === "left" ? "facing-left" : "facing-right";
   const appearanceId = snapshot.settings.petAppearanceId;
   const customAppearance = snapshot.settings.customPetAppearance;
-  const asset = getPetAsset(appearanceId, state, assetVariant, assetReplayKey, customAppearance);
-  const visibleCodexSessions = snapshot.codexActivity.sessions.slice(0, MAX_EXPANDED_CODEX_SESSIONS);
+  const useDirectionalQuitAsset = state === "quitRunning" && appearanceId !== "custom";
+  const facingClass =
+    snapshot.petFacing === "left" && !useDirectionalQuitAsset ? "facing-left" : "facing-right";
+  const asset = getPetAsset(
+    appearanceId,
+    state,
+    assetVariant,
+    assetReplayKey,
+    customAppearance,
+    snapshot.petFacing
+  );
+  const maxCodexStackStartIndex = Math.max(
+    0,
+    snapshot.codexActivity.sessions.length - MAX_EXPANDED_CODEX_SESSIONS
+  );
+  const visibleCodexSessions = snapshot.codexActivity.sessions.slice(
+    codexStackStartIndex,
+    codexStackStartIndex + MAX_EXPANDED_CODEX_SESSIONS
+  );
   const hiddenCodexSessionCount = Math.max(
     0,
-    snapshot.codexActivity.sessions.length - visibleCodexSessions.length
+    snapshot.codexActivity.sessions.length - (codexStackStartIndex + visibleCodexSessions.length)
   );
+  const hiddenNewerCodexSessionCount = codexStackStartIndex;
+  const petScaleStyle = { "--pet-scale": snapshot.petScale } as CSSProperties;
+  const primaryCodexSession = codexPrimarySession(snapshot.codexActivity);
+  const activeCodexDetailSession =
+    snapshot.codexActivity.sessions.find((session) => session.id === codexDetailSessionId) ??
+    primaryCodexSession;
+  const codexDetail = activeCodexDetailSession
+    ? codexSessionMessage(activeCodexDetailSession.message)
+    : codexActivityDetail(snapshot.codexActivity);
+  const codexDetailTitle = activeCodexDetailSession?.title ?? codexActivityTitle(snapshot.codexActivity);
+  const codexDetailLabel = activeCodexDetailSession
+    ? codexStateLabel(activeCodexDetailSession.state)
+    : codexActivityLabel(snapshot.codexActivity);
+  const shellStyle = {
+    ...petScaleStyle,
+    ...(resizeHandlePoint
+      ? {
+          "--resize-handle-left": `${resizeHandlePoint.left}px`,
+          "--resize-handle-top": `${resizeHandlePoint.top}px`
+        }
+      : {})
+  } as CSSProperties;
 
   function finishPointerDrag(clicked: boolean): void {
     const drag = dragRef.current;
@@ -154,7 +225,13 @@ export function PetView(): JSX.Element {
       return;
     }
 
+    if (codexExpanded && showCodexMulti) {
+      setMouseInteractive(true);
+      return;
+    }
+
     if (!point) {
+      setResizeHotspot(false);
       setMouseInteractive(false);
       return;
     }
@@ -167,10 +244,11 @@ export function PetView(): JSX.Element {
 
     const petButton = target.closest(PET_BUTTON_SELECTOR);
     const isOnPet = petButton ? pointInElementHitbox(point, petButton) : false;
-    const isOnBubble =
-      bubbleVisibleRef.current && Boolean(target.closest(BUBBLE_INTERACTIVE_SELECTOR));
+    const isOnInteractiveOverlay = Boolean(target.closest(BUBBLE_INTERACTIVE_SELECTOR));
+    const isOnResizeHotspot = Boolean(target.closest(".pet-resize-handle"));
 
-    setMouseInteractive(isOnPet || isOnBubble);
+    setResizeHotspot(isOnResizeHotspot);
+    setMouseInteractive(isOnPet || isOnInteractiveOverlay || isOnResizeHotspot);
   }
 
   useEffect(() => {
@@ -201,6 +279,7 @@ export function PetView(): JSX.Element {
     };
     const clearMouse = (): void => {
       lastMousePointRef.current = null;
+      setResizeHotspot(false);
       updateMouseInteractivity(null);
     };
 
@@ -221,13 +300,44 @@ export function PetView(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    bubbleVisibleRef.current = Boolean(bubble);
     updateMouseInteractivity(lastMousePointRef.current);
-  }, [bubble]);
+  }, [bubble, codexExpanded, showCodexMulti]);
 
   useEffect(() => {
     if (!showCodexMulti) setCodexExpanded(false);
   }, [bubble, showCodexMulti, snapshot.blockingMode]);
+
+  useEffect(() => {
+    setCodexStackStartIndex((current) =>
+      showCodexMulti ? Math.min(current, maxCodexStackStartIndex) : 0
+    );
+  }, [maxCodexStackStartIndex, showCodexMulti]);
+
+  useEffect(() => {
+    if (!showCodexActivity) {
+      setCodexDetailsOpen(false);
+      setCodexDetailSessionId(null);
+    }
+  }, [showCodexActivity]);
+
+  useEffect(() => {
+    const updateResizeHandlePoint = (): void => {
+      const shell = shellRef.current;
+      const button = petButtonRef.current;
+      if (!shell || !button) return;
+
+      const shellRect = shell.getBoundingClientRect();
+      const buttonRect = button.getBoundingClientRect();
+      setResizeHandlePoint({
+        left: Math.round(buttonRect.right - shellRect.left - 28),
+        top: Math.round(buttonRect.bottom - shellRect.top - 28)
+      });
+    };
+
+    updateResizeHandlePoint();
+    window.addEventListener("resize", updateResizeHandlePoint);
+    return () => window.removeEventListener("resize", updateResizeHandlePoint);
+  }, [asset.src, snapshot.petFacing, snapshot.petScale, state]);
 
   function startPointer(event: PointerEvent<HTMLButtonElement>): void {
     if (event.button !== 0) return;
@@ -266,15 +376,61 @@ export function PetView(): JSX.Element {
     finishPointerDrag(false);
   }
 
+  function startResizePointer(event: PointerEvent<HTMLButtonElement>): void {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setMouseInteractive(true);
+    setResizeHotspot(true);
+    window.pawpal.petResizeStart();
+  }
+
+  function stopResizePointer(event: PointerEvent<HTMLButtonElement>): void {
+    event.stopPropagation();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    window.pawpal.petResizeStop();
+  }
+
+  function openCodexSession(event: ReactMouseEvent<HTMLElement>, sessionId?: string): void {
+    if (!sessionId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    window.pawpal.openCodexSession(sessionId);
+  }
+
+  function showNewerCodexSessions(event: ReactMouseEvent<HTMLButtonElement>): void {
+    event.preventDefault();
+    event.stopPropagation();
+    setCodexStackStartIndex(0);
+  }
+
+  function showOlderCodexSessions(event: ReactMouseEvent<HTMLButtonElement>): void {
+    event.preventDefault();
+    event.stopPropagation();
+    setCodexStackStartIndex((current) => {
+      const remaining = Math.max(
+        0,
+        snapshot.codexActivity.sessions.length - (current + MAX_EXPANDED_CODEX_SESSIONS)
+      );
+      const step = remaining <= CODEX_STACK_SCROLL_STEP ? remaining : CODEX_STACK_SCROLL_STEP;
+      return Math.min(maxCodexStackStartIndex, current + step);
+    });
+  }
+
   return (
     <main
-      className="pet-shell"
+      ref={shellRef}
+      className={`pet-shell ${resizeHotspot ? "is-resize-hotspot" : ""}`}
+      style={shellStyle}
       aria-label="PawPal desktop pet"
       onContextMenu={(event) => {
         event.preventDefault();
         window.pawpal.petContextMenu();
       }}
     >
+      <div className="pet-stage">
       {bubble ? (
         <section className="speech-bubble">
           <p>{bubble.message}</p>
@@ -304,39 +460,65 @@ export function PetView(): JSX.Element {
 
       {showCodexMulti ? (
         codexExpanded ? (
-          <section
-            className="codex-chat-stack"
-            title={codexActivityTooltip(snapshot.codexActivity)}
-          >
+          <>
+            <section
+              className={`codex-chat-stack${
+                hiddenCodexSessionCount ? " has-more" : ""
+              }`}
+              aria-label={codexActivityTooltip(snapshot.codexActivity)}
+            >
+              {hiddenNewerCodexSessionCount ? (
+                <button
+                  className="codex-chat-latest"
+                  onClick={showNewerCodexSessions}
+                  type="button"
+                  aria-label="Show latest Codex chats"
+                >
+                  Latest
+                </button>
+              ) : null}
+              {visibleCodexSessions.map((session) => (
+                <article
+                  className={`codex-chat-card codex-chat-card--${session.state}`}
+                  key={session.id}
+                  onDoubleClick={(event) => openCodexSession(event, session.id)}
+                  onPointerEnter={() => {
+                    setCodexDetailSessionId(session.id);
+                    setCodexDetailsOpen(true);
+                  }}
+                  onPointerLeave={() => setCodexDetailsOpen(false)}
+                >
+                  <span>{session.title}</span>
+                  <strong>{codexStateLabel(session.state)}</strong>
+                  {codexSessionMessage(session.message) ? (
+                    <p>{codexSessionMessage(session.message)}</p>
+                  ) : null}
+                </article>
+              ))}
+              {hiddenCodexSessionCount ? (
+                <button
+                  className="codex-chat-more"
+                  onClick={showOlderCodexSessions}
+                  type="button"
+                  aria-label={`Show ${hiddenCodexSessionCount} older Codex chats`}
+                >
+                  +{hiddenCodexSessionCount} more
+                </button>
+              ) : null}
+            </section>
             <button
-              className="codex-chat-stack__collapse"
+              className={`codex-count-badge codex-count-badge--${codexState} codex-count-badge--expanded`}
               onClick={() => setCodexExpanded(false)}
               type="button"
               aria-label="Collapse Codex chats"
             >
               v
             </button>
-            {visibleCodexSessions.map((session) => (
-              <article
-                className={`codex-chat-card codex-chat-card--${session.state}`}
-                key={session.id}
-              >
-                <span>{session.title}</span>
-                <strong>{codexStateLabel(session.state)}</strong>
-                {codexSessionMessage(session.message) ? (
-                  <p>{codexSessionMessage(session.message)}</p>
-                ) : null}
-              </article>
-            ))}
-            {hiddenCodexSessionCount ? (
-              <div className="codex-chat-more">+{hiddenCodexSessionCount} more</div>
-            ) : null}
-          </section>
+          </>
         ) : (
           <button
             className={`codex-count-badge codex-count-badge--${codexState}`}
             onClick={() => setCodexExpanded(true)}
-            title={codexActivityTooltip(snapshot.codexActivity)}
             type="button"
             aria-label="Expand Codex chats"
           >
@@ -346,14 +528,40 @@ export function PetView(): JSX.Element {
       ) : showCodexActivity ? (
         <div
           className={`codex-badge codex-badge--${codexState}`}
-          title={codexActivityTooltip(snapshot.codexActivity)}
+          onDoubleClick={(event) => openCodexSession(event, primaryCodexSession?.id)}
+          onPointerEnter={() => setCodexDetailsOpen(true)}
+          onPointerLeave={() => setCodexDetailsOpen(false)}
+          aria-label={codexActivityTooltip(snapshot.codexActivity)}
         >
           <span>{codexActivityTitle(snapshot.codexActivity)}</span>
           <strong>{codexActivityLabel(snapshot.codexActivity)}</strong>
         </div>
       ) : null}
 
+      {showCodexActivity && codexDetailsOpen ? (
+        <section
+          className="codex-detail-popover"
+          onDoubleClick={(event) => openCodexSession(event, activeCodexDetailSession?.id)}
+          onPointerEnter={() => setCodexDetailsOpen(true)}
+          onPointerLeave={() => setCodexDetailsOpen(false)}
+        >
+          <span className="codex-detail-popover__tail tail-large" aria-hidden="true" />
+          <span className="codex-detail-popover__tail tail-small" aria-hidden="true" />
+          <header>
+            <span>{codexDetailTitle}</span>
+            <strong>{codexDetailLabel}</strong>
+          </header>
+          {codexDetail ? <p>{codexDetail}</p> : null}
+          {showCodexMulti && !codexExpanded ? (
+            <div className="codex-detail-more">
+              {snapshot.codexActivity.sessions.length - 1} more
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       <button
+        ref={petButtonRef}
         className={`pet-button state-${state} codex-${codexState} ${facingClass} ${
           asset.isPlaceholder ? "placeholder-asset" : ""
         }`}
@@ -366,6 +574,18 @@ export function PetView(): JSX.Element {
         type="button"
       >
         <img draggable={false} src={asset.src} alt={altText} />
+      </button>
+      </div>
+      <button
+        aria-label="Drag to make PawPal bigger or smaller"
+        className="pet-resize-handle"
+        onPointerCancel={stopResizePointer}
+        onPointerDown={startResizePointer}
+        onPointerUp={stopResizePointer}
+        title="Drag to make PawPal bigger or smaller"
+        type="button"
+      >
+        <span className="pet-resize-tooltip">Drag to resize</span>
       </button>
     </main>
   );

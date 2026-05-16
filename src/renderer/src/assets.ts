@@ -2,7 +2,7 @@ import {
   getPetAssetDefinition,
   resolvePetAppearanceId
 } from "../../shared/petAppearances";
-import type { CustomPetAppearance, PetAppearanceId, PetState } from "../../shared/types";
+import type { CustomPetAppearance, PetAppearanceId, PetFacing, PetState } from "../../shared/types";
 
 const warnedPlaceholders = new Set<string>();
 
@@ -31,12 +31,16 @@ export function getPetAsset(
   state: PetState,
   variantIndex = 0,
   replayKey = 0,
-  custom?: CustomPetAppearance | null
+  custom?: CustomPetAppearance | null,
+  facing?: PetFacing
 ): PetAsset {
   const resolvedAppearanceId = resolvePetAppearanceId(appearanceId);
   const asset = getPetAssetDefinition(resolvedAppearanceId, state, custom);
   const paths = normalizeAssetPaths(asset.path);
-  const selectedPath = paths[Math.abs(variantIndex) % paths.length];
+  const selectedPath =
+    state === "quitRunning" && resolvedAppearanceId !== "custom" && facing === "left"
+      ? "pet_assets/线条小狗/quitRunning/running_dog_left.gif"
+      : paths[Math.abs(variantIndex) % paths.length];
   const warningKey = `${resolvedAppearanceId}:${state}`;
 
   if (asset.isPlaceholder && !warnedPlaceholders.has(warningKey)) {

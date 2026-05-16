@@ -25,6 +25,18 @@ export type SavedWindowPosition = {
   relativeY?: number;
 };
 
+export type WindowOverflow = {
+  left?: number;
+  right?: number;
+  top?: number;
+  bottom?: number;
+};
+
+export type HorizontalRunTarget = {
+  endX: number;
+  facing: "left" | "right";
+};
+
 function clamp(value: number, min: number, max: number): number {
   if (max < min) return min;
   return Math.min(Math.max(value, min), max);
@@ -77,11 +89,23 @@ export function displayForBounds(
   );
 }
 
-export function clampBoundsToWorkArea(bounds: WindowBounds, workArea: WorkArea): WindowBounds {
+export function clampBoundsToWorkArea(
+  bounds: WindowBounds,
+  workArea: WorkArea,
+  overflow: WindowOverflow = {}
+): WindowBounds {
   return {
     ...bounds,
-    x: clamp(bounds.x, workArea.x, workArea.x + workArea.width - bounds.width),
-    y: clamp(bounds.y, workArea.y, workArea.y + workArea.height - bounds.height)
+    x: clamp(
+      bounds.x,
+      workArea.x - (overflow.left ?? 0),
+      workArea.x + workArea.width - bounds.width + (overflow.right ?? 0)
+    ),
+    y: clamp(
+      bounds.y,
+      workArea.y - (overflow.top ?? 0),
+      workArea.y + workArea.height - bounds.height + (overflow.bottom ?? 0)
+    )
   };
 }
 
@@ -160,8 +184,46 @@ export function initialWindowBounds({
 export function visibleWindowBounds(
   displays: DisplayBounds[],
   primaryDisplay: DisplayBounds,
-  bounds: WindowBounds
+  bounds: WindowBounds,
+  overflow?: WindowOverflow
 ): WindowBounds {
   const targetDisplay = displayForBounds(displays, bounds, primaryDisplay);
-  return clampBoundsToWorkArea(bounds, targetDisplay.workArea);
+  return clampBoundsToWorkArea(bounds, targetDisplay.workArea, overflow);
+}
+
+export function rightmostWorkArea(displays: DisplayBounds[], fallback: DisplayBounds): WorkArea {
+  return (
+    [...displays].sort((left, right) => {
+      return right.workArea.x + right.workArea.width - (left.workArea.x + left.workArea.width);
+    })[0]?.workArea ?? fallback.workArea
+  );
+}
+
+export function leftmostWorkArea(displays: DisplayBounds[], fallback: DisplayBounds): WorkArea {
+  return [...displays].sort((left, right) => left.workArea.x - right.workArea.x)[0]?.workArea ?? fallback.workArea;
+}
+
+export function horizontalRunTarget(
+  displays: DisplayBounds[],
+  primaryDisplay: DisplayBounds,
+  bounds: WindowBounds,
+  gap = 24
+): HorizontalRunTarget {
+  const currentDisplay = displayForBounds(displays, bounds, primaryDisplay);
+  const petCenterX = center(bounds).x;
+  const currentDisplayCenterX = currentDisplay.workArea.x + currentDisplay.workArea.width / 2;
+
+  if (petCenterX < currentDisplayCenterX) {
+    const workArea = rightmostWorkArea(displays, primaryDisplay);
+    return {
+      endX: workArea.x + workArea.width + gap,
+      facing: "right"
+    };
+  }
+
+  const workArea = leftmostWorkArea(displays, primaryDisplay);
+  return {
+    endX: workArea.x - bounds.width - gap,
+    facing: "left"
+  };
 }

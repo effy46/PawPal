@@ -46,7 +46,9 @@ import {
   DISTRACTION_CHECK_INTERVAL_MS,
   DISTRACTION_WARNING_COOLDOWN_MS,
   IS_DEV,
+  PET_SCALE,
   PET_WINDOW,
+  PET_WINDOW_TRANSPARENT_SIDE_GAP,
   PRELOAD_PATH,
   RELEASES_URL,
   RENDERER_HTML_PATH,
@@ -54,6 +56,7 @@ import {
   STORE_NAME
 } from "./config";
 import {
+  horizontalRunTarget,
   initialWindowBounds,
   savedPositionFromBounds,
   visibleWindowBounds
@@ -85,6 +88,7 @@ type StoreSchema = {
   stats: TodayStats;
   statsHistory: StatsHistory;
   petPosition?: SavedWindowPosition;
+  petScale?: number;
 };
 
 type PetPosition = {
@@ -127,12 +131,18 @@ let focusEndsAt: number | null = null;
 let bubbleTimer: NodeJS.Timeout | null = null;
 let dragTimer: NodeJS.Timeout | null = null;
 let dragSafetyTimer: NodeJS.Timeout | null = null;
+let resizeTimer: NodeJS.Timeout | null = null;
+let resizeSafetyTimer: NodeJS.Timeout | null = null;
+let quitAnimationTimer: NodeJS.Timeout | null = null;
 let breakRunVelocity: PetPosition = { x: 0, y: 0 };
 let breakRunFormatter: ((seconds: number) => string) | null = null;
 let nextBreakRunTurnAt = 0;
 let breakMutedToday = false;
 let dragOffset: PetPosition = { x: 0, y: 0 };
+let petScale = normalizePetScale(store.get("petScale"));
 let petMouseInteractive = true;
+let quitAnimationRunning = false;
+let quitAfterAnimation = false;
 let distractionStatus: DistractionStatus = {
   state: "idle",
   activeApp: "",
@@ -143,6 +153,31 @@ let distractionStatus: DistractionStatus = {
   error: null
 };
 let updateCheck: UpdateCheckResult = createInitialUpdateCheck();
+
+type PetResizeSession = {
+  startCursor: PetPosition;
+  startBounds: Electron.Rectangle;
+  startScale: number;
+};
+
+let petResizeSession: PetResizeSession | null = null;
+
+function normalizePetScale(value: unknown): number {
+  const numeric = typeof value === "number" && Number.isFinite(value) ? value : PET_SCALE.default;
+  return Math.min(Math.max(numeric, PET_SCALE.min), PET_SCALE.max);
+}
+
+function petWindowSize(scale = petScale): { width: number; height: number } {
+  return {
+    width: Math.round(PET_WINDOW.width * scale),
+    height: Math.round(PET_WINDOW.height * scale)
+  };
+}
+
+function petDragOverflow(scale = petScale): { left: number; right: number } {
+  const x = Math.round(PET_WINDOW_TRANSPARENT_SIDE_GAP * scale);
+  return { left: x, right: x };
+}
 
 function codexActivityPath(): string {
   return join(app.getPath("home"), ".codex", "pawpal", "activity.json");
@@ -184,8 +219,10 @@ let codexActivity: CodexActivity = {
 const CODEX_SESSION_TAIL_BYTES = 256 * 1024;
 const CODEX_SESSION_ACTIVE_STALE_MS = 10 * 60 * 1000;
 const CODEX_SESSION_ACTIVE_WINDOW_MS = 60 * 1000;
-const CODEX_SESSION_READY_WINDOW_MS = 3 * 1000;
+const CODEX_SESSION_READY_WINDOW_MS = 60 * 1000;
 const CODEX_SESSION_POLL_MS = 1000;
+const CODEX_THREAD_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type CodexSessionEvent = {
   timestamp?: string;
@@ -193,6 +230,7 @@ type CodexSessionEvent = {
   payload?: {
     id?: string;
     type?: string;
+    isCompleted?: boolean;
     name?: string;
     role?: string;
     message?: string;
@@ -211,6 +249,43 @@ function setPetMouseInteractive(interactive: boolean): void {
   if (!petWindow || petWindow.isDestroyed() || petMouseInteractive === interactive) return;
   petMouseInteractive = interactive;
   petWindow.setIgnoreMouseEvents(!interactive, { forward: true });
+}
+
+function clearRuntimeTimers(): void {
+  for (const timer of [
+    breakRunTimer,
+    breakRunCountdownTimer,
+    breakRunMovementTimer,
+    breakTimer,
+    hydrationTimer,
+    focusTimer,
+    distractionTimer,
+    distractionStartupTimer,
+    displayChangeTimer,
+    codexActivityTimer,
+    bubbleTimer,
+    dragTimer,
+    dragSafetyTimer,
+    resizeTimer,
+    resizeSafetyTimer
+  ]) {
+    if (timer) clearTimeout(timer);
+  }
+  breakRunTimer = null;
+  breakRunCountdownTimer = null;
+  breakRunMovementTimer = null;
+  breakTimer = null;
+  hydrationTimer = null;
+  focusTimer = null;
+  distractionTimer = null;
+  distractionStartupTimer = null;
+  displayChangeTimer = null;
+  codexActivityTimer = null;
+  bubbleTimer = null;
+  dragTimer = null;
+  dragSafetyTimer = null;
+  resizeTimer = null;
+  resizeSafetyTimer = null;
 }
 
 function getSettings(): Settings {
@@ -314,6 +389,7 @@ function snapshot(): AppSnapshot {
     distraction: distractionStatus,
     petState,
     petFacing,
+    petScale,
     codexActivity,
     blockingMode,
     dogVisible: Boolean(petWindow?.isVisible()),
@@ -549,6 +625,7 @@ function parseCodexSessionEvents(raw: string): CodexSessionEvent[] {
 function messageForCodexSessionEvent(event: CodexSessionEvent): string | null {
   const payload = event.payload;
   if (!payload) return null;
+  if (payload.type === "planImplementation" && payload.isCompleted !== true) return "Plan ready";
   if (payload.type === "function_call" && payload.name === "request_user_input") {
     return "Needs your reply";
   }
@@ -575,6 +652,7 @@ function messageNeedsReply(message: string | null | undefined): boolean {
 function stateForCodexSessionEvent(event: CodexSessionEvent): CodexActivityState | null {
   const payload = event.payload;
   if (!payload) return null;
+  if (payload.type === "planImplementation" && payload.isCompleted !== true) return "waiting";
   if (payload.type === "function_call" && payload.name === "request_user_input") return "waiting";
   if (payload.type === "task_started" || payload.type === "user_message" || payload.type === "reasoning") {
     return "working";
@@ -859,7 +937,7 @@ function initialPetBounds(): Electron.Rectangle {
   return initialWindowBounds({
     displays: currentDisplays(),
     primaryDisplay: primaryDisplay(),
-    size: PET_WINDOW,
+    size: petWindowSize(),
     saved: stored
   });
 }
@@ -906,8 +984,8 @@ function createPetWindow(): void {
   const bounds = initialPetBounds();
   petMouseInteractive = true;
   petWindow = new BrowserWindow({
-    width: PET_WINDOW.width,
-    height: PET_WINDOW.height,
+    width: bounds.width,
+    height: bounds.height,
     x: bounds.x,
     y: bounds.y,
     transparent: true,
@@ -945,11 +1023,13 @@ function createPetWindow(): void {
   });
   petWindow.on("hide", () => {
     stopPetDrag();
+    stopPetResize();
     updateTrayMenu();
     publishSnapshot();
   });
   petWindow.on("closed", () => {
     stopPetDrag();
+    stopPetResize();
     petWindow = null;
     updateTrayMenu();
     publishSnapshot();
@@ -1028,6 +1108,59 @@ function hidePetWindowFromMenu(): void {
   sendToAll("app:snapshot", snapshot());
 }
 
+function finishQuitAfterAnimation(): void {
+  if (quitAnimationTimer) {
+    clearInterval(quitAnimationTimer);
+    quitAnimationTimer = null;
+  }
+  quitAfterAnimation = true;
+  app.quit();
+}
+
+function runQuitAnimation(): void {
+  if (quitAnimationRunning) return;
+  quitAnimationRunning = true;
+  clearRuntimeTimers();
+  blockingMode = null;
+  focusActive = false;
+  settingsWindow?.close();
+
+  if (!petWindow || petWindow.isDestroyed()) {
+    finishQuitAfterAnimation();
+    return;
+  }
+
+  const win = petWindow;
+  if (!win.isVisible()) win.showInactive();
+  setPetMouseInteractive(false);
+  petState = "quitRunning";
+  const startBounds = win.getBounds();
+  const target = horizontalRunTarget(currentDisplays(), primaryDisplay(), startBounds);
+  petFacing = target.facing;
+  publishSnapshot();
+
+  const endX = target.endX;
+  const startX = startBounds.x;
+  const startAt = Date.now();
+  const durationMs = Math.max(2800, Math.min(6400, Math.abs(endX - startX) * 16));
+
+  quitAnimationTimer = setInterval(() => {
+    if (win.isDestroyed()) {
+      finishQuitAfterAnimation();
+      return;
+    }
+
+    const progress = Math.min(1, (Date.now() - startAt) / durationMs);
+    const eased = 1 - (1 - progress) ** 3;
+    win.setBounds({
+      ...startBounds,
+      x: Math.round(startX + (endX - startX) * eased)
+    });
+
+    if (progress >= 1) finishQuitAfterAnimation();
+  }, 16);
+}
+
 function menuState() {
   return {
     appName: APP_NAME,
@@ -1045,7 +1178,7 @@ function menuActions() {
     stopFocusFromMenu: () => stopFocusMode(true),
     stopFocusFromContext: () => stopFocusMode(false),
     openSettings: createSettingsWindow,
-    quit: () => app.quit(),
+    quit: runQuitAnimation,
     triggerDemo
   };
 }
@@ -1076,20 +1209,28 @@ function showPetContextMenu(): void {
 function movePetWithCursor(): void {
   if (!petWindow || petWindow.isDestroyed()) return;
   const cursor = screen.getCursorScreenPoint();
-  const bounds = visibleWindowBounds(currentDisplays(), primaryDisplay(), {
-    width: PET_WINDOW.width,
-    height: PET_WINDOW.height,
-    x: cursor.x - dragOffset.x,
-    y: cursor.y - dragOffset.y
-  });
+  const currentBounds = petWindow.getBounds();
+  const bounds = visibleWindowBounds(
+    currentDisplays(),
+    primaryDisplay(),
+    {
+      width: currentBounds.width,
+      height: currentBounds.height,
+      x: cursor.x - dragOffset.x,
+      y: cursor.y - dragOffset.y
+    },
+    petDragOverflow()
+  );
   petWindow.setBounds(bounds);
 }
 
 function startPetDrag(offset: { offsetX: number; offsetY: number }): void {
   if (blockingMode === "breakRun" || !petWindow || petWindow.isDestroyed()) return;
+  stopPetResize();
+  const bounds = petWindow.getBounds();
   dragOffset = {
-    x: Math.min(Math.max(Math.round(offset.offsetX), 0), PET_WINDOW.width),
-    y: Math.min(Math.max(Math.round(offset.offsetY), 0), PET_WINDOW.height)
+    x: Math.min(Math.max(Math.round(offset.offsetX), 0), bounds.width),
+    y: Math.min(Math.max(Math.round(offset.offsetY), 0), bounds.height)
   };
   if (dragTimer) clearInterval(dragTimer);
   if (dragSafetyTimer) clearTimeout(dragSafetyTimer);
@@ -1111,6 +1252,61 @@ function stopPetDrag(): void {
   if (wasDragging) {
     persistPetPosition();
     sendToAll("app:snapshot", snapshot());
+  }
+}
+
+function movePetResizeWithCursor(): void {
+  if (!petResizeSession || !petWindow || petWindow.isDestroyed()) return;
+
+  const cursor = screen.getCursorScreenPoint();
+  const dx = cursor.x - petResizeSession.startCursor.x;
+  const dy = cursor.y - petResizeSession.startCursor.y;
+  const nextScale = normalizePetScale(
+    petResizeSession.startScale + (dx / PET_WINDOW.width + dy / PET_WINDOW.height) / 2
+  );
+  const nextSize = petWindowSize(nextScale);
+  const nextBounds = visibleWindowBounds(currentDisplays(), primaryDisplay(), {
+    x: petResizeSession.startBounds.x,
+    y: petResizeSession.startBounds.y,
+    width: nextSize.width,
+    height: nextSize.height
+  });
+
+  petScale = nextScale;
+  petWindow.setBounds(nextBounds);
+  publishSnapshot();
+}
+
+function startPetResize(): void {
+  if (blockingMode === "breakRun" || !petWindow || petWindow.isDestroyed()) return;
+  stopPetDrag();
+  petResizeSession = {
+    startCursor: screen.getCursorScreenPoint(),
+    startBounds: petWindow.getBounds(),
+    startScale: petScale
+  };
+  if (resizeTimer) clearInterval(resizeTimer);
+  if (resizeSafetyTimer) clearTimeout(resizeSafetyTimer);
+  movePetResizeWithCursor();
+  resizeTimer = setInterval(movePetResizeWithCursor, 16);
+  resizeSafetyTimer = setTimeout(stopPetResize, 15_000);
+}
+
+function stopPetResize(): void {
+  const wasResizing = Boolean(petResizeSession || resizeTimer || resizeSafetyTimer);
+  petResizeSession = null;
+  if (resizeTimer) {
+    clearInterval(resizeTimer);
+    resizeTimer = null;
+  }
+  if (resizeSafetyTimer) {
+    clearTimeout(resizeSafetyTimer);
+    resizeSafetyTimer = null;
+  }
+  if (wasResizing) {
+    store.set("petScale", petScale);
+    persistPetPosition();
+    publishSnapshot();
   }
 }
 
@@ -1159,9 +1355,9 @@ function movePetForBreakRun(): void {
   }).workArea;
   const now = Date.now();
   const minX = workArea.x + 8;
-  const maxX = workArea.x + workArea.width - PET_WINDOW.width - 8;
+  const maxX = workArea.x + workArea.width - bounds.width - 8;
   const minY = workArea.y + 8;
-  const maxY = workArea.y + workArea.height - PET_WINDOW.height - 8;
+  const maxY = workArea.y + workArea.height - bounds.height - 8;
 
   if (now >= nextBreakRunTurnAt && Math.random() < 0.45) {
     breakRunVelocity = chooseBreakRunVelocity();
@@ -1397,6 +1593,14 @@ function setUpdateCheck(next: UpdateCheckResult): void {
 function openReleaseNotes(): void {
   void shell.openExternal(updateCheck.releaseUrl || RELEASES_URL).catch((error) => {
     console.error("Failed to open PawPal releases:", error);
+  });
+}
+
+function openCodexSession(sessionId: string): void {
+  const threadId = sessionId.trim();
+  if (!CODEX_THREAD_ID_PATTERN.test(threadId)) return;
+  void shell.openExternal(`codex://threads/${threadId}`).catch((error) => {
+    console.error("Failed to open Codex session:", error);
   });
 }
 
@@ -1663,6 +1867,9 @@ function registerIpc(): void {
     startPetDrag(offset)
   );
   ipcMain.on("pet:drag-stop", stopPetDrag);
+  ipcMain.on("pet:resize-start", startPetResize);
+  ipcMain.on("pet:resize-stop", stopPetResize);
+  ipcMain.on("codex:open-session", (_event, sessionId: string) => openCodexSession(sessionId));
   ipcMain.on("pet:set-mouse-interactive", (_event, interactive: boolean) => {
     setPetMouseInteractive(interactive);
   });
@@ -1729,23 +1936,16 @@ app.whenReady().then(() => {
   });
 });
 
-app.on("before-quit", () => {
-  for (const timer of [
-    breakRunTimer,
-    breakRunCountdownTimer,
-    breakRunMovementTimer,
-    breakTimer,
-    hydrationTimer,
-    focusTimer,
-    distractionTimer,
-    distractionStartupTimer,
-    displayChangeTimer,
-    codexActivityTimer,
-    bubbleTimer,
-    dragTimer,
-    dragSafetyTimer
-  ]) {
-    if (timer) clearTimeout(timer);
+app.on("before-quit", (event) => {
+  if (!quitAfterAnimation) {
+    event.preventDefault();
+    runQuitAnimation();
+    return;
+  }
+  clearRuntimeTimers();
+  if (quitAnimationTimer) {
+    clearInterval(quitAnimationTimer);
+    quitAnimationTimer = null;
   }
 });
 

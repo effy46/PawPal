@@ -34,7 +34,8 @@ export const PET_STATE_ORDER: PetState[] = [
   "focusAlert",
   "focusDone",
   "sad",
-  "sleeping"
+  "sleeping",
+  "quitRunning"
 ];
 
 export const REQUIRED_CUSTOM_PET_STATES: PetState[] = ["idle"];
@@ -43,6 +44,7 @@ const goldenPuppy = (state: PetState, name: string): string =>
   `pet_assets/金毛 puppy/${state}/${name}`;
 const lineDog = (state: PetState, name: string): string => `pet_assets/线条小狗/${state}/${name}`;
 const xiaoJiMao = (state: PetState, name: string): string => `pet_assets/小鸡毛/${state}/${name}`;
+const quitRunningDog = (): string => lineDog("quitRunning", "running_dog_right.gif");
 
 const STATE_FALLBACKS: Partial<Record<PetState, PetState>> = {
   breakDone: "happy",
@@ -86,7 +88,8 @@ export const PET_APPEARANCES: Record<BuiltInPetAppearanceId, PetAppearanceManife
       focusGuard: { path: goldenPuppy("focusGuard", "standing pose4.gif") },
       focusAlert: { path: goldenPuppy("focusAlert", "2 - standing reminder.gif") },
       sad: { path: goldenPuppy("sad", "4 - sleeping.gif"), isPlaceholder: true },
-      sleeping: { path: goldenPuppy("sleeping", "4 - sleeping.gif"), isPlaceholder: true }
+      sleeping: { path: goldenPuppy("sleeping", "4 - sleeping.gif"), isPlaceholder: true },
+      quitRunning: { path: quitRunningDog() }
     }
   },
   lineDog: {
@@ -102,6 +105,7 @@ export const PET_APPEARANCES: Record<BuiltInPetAppearanceId, PetAppearanceManife
     states: {
       idle: {
         path: [
+          lineDog("idle", "codex-idle.gif"),
           lineDog("idle", "线条小狗第12弹_无聊.gif"),
           lineDog("idle", "线条小狗第12弹_晃脚脚.gif"),
           lineDog("idle", "线条小狗第1弹_摆烂.gif"),
@@ -150,6 +154,7 @@ export const PET_APPEARANCES: Record<BuiltInPetAppearanceId, PetAppearanceManife
       },
       focusGuard: {
         path: [
+          lineDog("focusGuard", "codex-working-reviewing.gif"),
           lineDog("focusGuard", "线条小狗第17弹_工作.gif"),
           lineDog("focusGuard", "线条小狗第2弹_努力.gif"),
           lineDog("focusGuard", "线条小狗第9弹_甩耳朵.gif")
@@ -157,6 +162,7 @@ export const PET_APPEARANCES: Record<BuiltInPetAppearanceId, PetAppearanceManife
       },
       focusAlert: {
         path: [
+          lineDog("focusGuard", "codex-working-reviewing.gif"),
           lineDog("focusAlert", "线条小狗第15弹_惊.gif"),
           lineDog("focusAlert", "线条小狗第15弹_疑问.gif"),
           lineDog("focusAlert", "线条小狗第1弹_什么.gif"),
@@ -166,6 +172,7 @@ export const PET_APPEARANCES: Record<BuiltInPetAppearanceId, PetAppearanceManife
       },
       focusDone: {
         path: [
+          lineDog("focusDone", "codex-complete.gif"),
           lineDog("focusDone", "线条小狗第1弹_庆祝.gif"),
           lineDog("focusDone", "线条小狗第2弹_庆祝.gif"),
           lineDog("focusDone", "线条小狗第3弹_好耶.gif")
@@ -181,6 +188,9 @@ export const PET_APPEARANCES: Record<BuiltInPetAppearanceId, PetAppearanceManife
       },
       sleeping: {
         path: lineDog("sleeping", "线条小狗第12弹_困.gif")
+      },
+      quitRunning: {
+        path: quitRunningDog()
       }
     }
   },
@@ -280,6 +290,9 @@ export const PET_APPEARANCES: Record<BuiltInPetAppearanceId, PetAppearanceManife
       },
       sleeping: {
         path: xiaoJiMao("sleeping", "线条小狗第14弹_难受.gif")
+      },
+      quitRunning: {
+        path: quitRunningDog()
       }
     }
   }

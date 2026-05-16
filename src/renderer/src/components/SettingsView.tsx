@@ -24,6 +24,7 @@ import { distractionHelp, formatDistractionState, formatTimer, formatTimestamp, 
 import { useNow, useSnapshot } from "../hooks";
 
 type SettingsCopy = ReturnType<typeof i18n>["settings"];
+const CUSTOM_PET_STATE_ORDER = PET_STATE_ORDER.filter((state) => state !== "quitRunning");
 
 function Row({
   label,
@@ -878,7 +879,7 @@ function CustomPetEditor({
         </span>
       </div>
       <div className="custom-pet__grid">
-        {PET_STATE_ORDER.map((state) => {
+        {CUSTOM_PET_STATE_ORDER.map((state) => {
           const reference = getPetAsset("lineDog", state);
           const customAsset = customPetAppearance?.assets[state] ?? null;
           const customPreview = customAsset ? customPetAssetPreviewSrc(customAsset) : null;
