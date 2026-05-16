@@ -48,9 +48,9 @@ Download the latest installer from [Releases](../../releases):
 
 | File | Platform |
 |------|----------|
-| `PawPal-x.x.x-arm64.dmg` | macOS Apple Silicon |
-| `PawPal-x.x.x-x64.dmg` | macOS Intel |
-| `PawPal.Setup.x.x.x.exe` | Windows 64-bit |
+| `PawPal-0.3.0-effy.1-arm64.dmg` | macOS Apple Silicon |
+| `PawPal-0.3.0-effy.1.dmg` | macOS Intel / universal build |
+| Not provided in this release | Windows 64-bit; build from source on Windows with `pnpm dist:win` |
 
 > **macOS**: On first launch, macOS may say the developer cannot be verified. Allow the app in System Settings -> Privacy & Security. Focus distraction detection also requires Accessibility permission.
 >
@@ -63,7 +63,7 @@ Download the latest installer from [Releases](../../releases):
 >
 > To make a `.dmg` that opens cleanly for other people, sign it with an Apple Developer ID certificate and submit it for Apple notarization.
 >
-> **Windows**: distraction detection is not supported yet; the rest of the app works normally.
+> **Windows**: a prebuilt Windows installer is not provided for this fork release. Build it from source on Windows with `pnpm dist:win`. Distraction detection is not supported yet; the rest of the app works normally.
 
 ### Run From Source
 
@@ -107,7 +107,7 @@ pnpm install
 pnpm dist:win
 ```
 
-After the build finishes, run `dist/PawPal.Setup.x.x.x.exe`. Windows packages are best built on Windows; building them on macOS may require Wine.
+After the build finishes, run the generated `dist/PawPal.Setup.*.exe`. Windows packages are best built on Windows; building them on macOS may require Wine.
 
 ### Build
 
@@ -200,9 +200,9 @@ PawPal 是一款支持 macOS 和 Windows 的桌面宠物应用。一只透明、
 
 | 文件 | 适用设备 |
 |------|----------|
-| `PawPal-x.x.x-arm64.dmg` | macOS Apple Silicon |
-| `PawPal-x.x.x-x64.dmg` | macOS Intel |
-| `PawPal.Setup.x.x.x.exe` | Windows 64 位 |
+| `PawPal-0.3.0-effy.1-arm64.dmg` | macOS Apple Silicon |
+| `PawPal-0.3.0-effy.1.dmg` | macOS Intel / universal build |
+| 本版本未提供 | Windows 64 位；请在 Windows 上用 `pnpm dist:win` 从源码构建 |
 
 > **macOS**：首次打开时，系统可能提示“无法验证开发者”。请到“系统设置 -> 隐私与安全性”中允许打开。专注模式的分心检测还需要授予“辅助功能”权限。
 >
@@ -215,7 +215,7 @@ PawPal 是一款支持 macOS 和 Windows 的桌面宠物应用。一只透明、
 >
 > 如果希望分享出去的 `.dmg` 可以直接双击打开，需要使用 Apple Developer ID 证书签名，并提交 Apple 公证。
 >
-> **Windows**：分心检测暂不支持 Windows；其他功能可以正常使用。
+> **Windows**：本 fork 暂未提供预编译的 Windows 安装包。如需 Windows 版本，请在 Windows 环境下运行 `pnpm dist:win` 自行构建。分心检测目前仍不支持 Windows，其余功能可正常使用。
 
 ### 从源码运行
 
@@ -259,7 +259,7 @@ pnpm install
 pnpm dist:win
 ```
 
-构建完成后，运行 `dist/PawPal.Setup.x.x.x.exe` 安装。Windows 安装包建议在 Windows 机器上构建；如果在 macOS 上构建，可能需要额外安装 Wine。
+构建完成后，运行生成的 `dist/PawPal.Setup.*.exe` 安装。Windows 安装包建议在 Windows 机器上构建；如果在 macOS 上构建，可能需要额外安装 Wine。
 
 ### 构建
 

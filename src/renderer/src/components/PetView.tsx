@@ -582,7 +582,6 @@ export function PetView(): JSX.Element {
         onPointerCancel={stopResizePointer}
         onPointerDown={startResizePointer}
         onPointerUp={stopResizePointer}
-        title="Drag to make PawPal bigger or smaller"
         type="button"
       >
         <span className="pet-resize-tooltip">Drag to resize</span>
