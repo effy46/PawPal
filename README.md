@@ -121,22 +121,9 @@ pnpm dist:win     # package Windows only; on macOS this may require Wine
 
 ### Codex Activity Bridge
 
-While PawPal is running, it watches Codex session logs under `~/.codex/sessions`, infers `idle`, `working`, `reviewing`, `complete`, `waiting`, and `error`, and mirrors the current state to `~/.codex/pawpal/activity.json`.
+PawPal can reflect your live Codex work directly in the pet UI. When Codex is active, the pet shows a compact status badge; hover it for a manga-style thought bubble with the current chat summary, or double-click to jump back to that Codex chat.
 
-When Codex is active, PawPal shows a compact status badge. Hover the badge to see the highest-priority chat and its latest message in a manga-style thought bubble. Double-click the badge, thought bubble, or an expanded chat card to open the matching Codex chat. When multiple chats are active, the badge shows the active count; click it to expand separate status cards for each chat. Plan implementation requests show as `Needs Input`, and `Ready` stays visible briefly while the pet settles back to idle. Break, hydration, and focus reminders always take priority over Codex status UI.
-
-You can still write this shape manually to test the companion:
-
-```json
-{
-  "state": "working",
-  "message": "Editing files",
-  "updatedAt": 1778785200000,
-  "source": "manual"
-}
-```
-
-Supported `state` values: `idle`, `working`, `reviewing`, `complete`, `waiting`, `error`.
+If several Codex chats are active, PawPal groups them behind a count badge that can expand into separate chat cards. Break, hydration, and focus reminders still take priority, so health nudges never get buried behind coding status.
 
 ### Tech Stack
 
@@ -273,22 +260,9 @@ pnpm dist:win     # 仅打包 Windows；在 macOS 上可能需要 Wine
 
 ### Codex 状态联动
 
-PawPal 运行时会自动读取 `~/.codex/sessions` 里的 Codex 会话日志，推断 `idle`、`working`、`reviewing`、`complete`、`waiting`、`error` 状态，并同步写入 `~/.codex/pawpal/activity.json`。
+PawPal 可以把你的 Codex 工作状态直接显示在桌宠 UI 里。Codex 活跃时，小狗会显示一个简洁的状态徽标；鼠标悬停可用漫画风思考泡泡查看当前聊天摘要，双击则可跳回对应的 Codex 聊天。
 
-Codex 活跃时，PawPal 会显示一个简洁的状态徽标。鼠标悬停在徽标上，可以通过漫画风思考泡泡查看当前最重要的聊天和最新动态。双击状态徽标、思考泡泡或展开后的聊天卡片，即可打开对应的 Codex 聊天。如果多个 Codex 聊天同时活跃，徽标会显示数量；点击后可以展开每个聊天的独立状态卡片。等待执行的计划会显示为 `Needs Input`；`Ready` 会短暂保留，随后让宠物回到待机动画。休息、喝水和专注提醒始终优先于 Codex 状态界面。
-
-你也可以手动写入下面的内容来测试桌宠动画：
-
-```json
-{
-  "state": "working",
-  "message": "Editing files",
-  "updatedAt": 1778785200000,
-  "source": "manual"
-}
-```
-
-支持的 `state`：`idle`、`working`、`reviewing`、`complete`、`waiting`、`error`。
+如果多个 Codex 聊天同时活跃，PawPal 会先显示数量徽标，点击后展开为独立聊天卡片。休息、喝水和专注提醒仍然优先显示，所以健康提醒不会被编码状态挡住。
 
 ### 技术栈
 
