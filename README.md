@@ -30,10 +30,10 @@ PawPal is a desktop pet app for macOS and Windows. A transparent, always-on-top 
 - **Break reminders** — timed nudges to get up and move; the dog can run across your screen to get your attention
 - **Hydration reminders** — gentle prompts to drink water
 - **Focus mode** — detects your active app; if you drift into social media, the dog nudges you back to work
-- **Codex activity** — watches Codex session logs, summarizes active chats, detects plan-ready waits, shows hover details in a manga-style thought bubble, expands multi-chat status on click, and opens the matching Codex chat on double-click
+- **Agent activity** — White Line Dog watches Codex session logs; Yellow Dog watches Claude Code transcripts. PawPal summarizes active chats, file reads, searches, edits, tool calls, and web searches in the same thought-bubble UI
 - **Resizable desktop pet** — hover the lower-right corner of the pet window to reveal a resize handle, then drag to make PawPal bigger or smaller
-- **Multiple pet styles** — includes Line Dog, Golden Puppy, Xiao Ji Mao, and custom GIF uploads for each pet state
-- **Settings dashboard** — tracks today's breaks, waters, focus minutes, and distraction warnings, with runtime diagnostics for Codex and focus detection
+- **Multiple pet styles** — includes White Line Dog, Yellow Dog, Golden Puppy, Xiao Ji Mao, and custom GIF uploads for each pet state
+- **Settings dashboard** — tracks today's breaks, waters, focus minutes, and distraction warnings, with runtime diagnostics for agent activity and focus detection
 - **System controls** — launch-at-login, manual or startup update checks, configurable reminder timing, blocked apps, and blocked keywords
 - **Chinese / English UI**
 - **Local-first data** — settings and stats stay on your machine; PawPal only contacts GitHub Releases when you check for updates manually or enable update checks on launch
@@ -42,15 +42,23 @@ PawPal is a desktop pet app for macOS and Windows. A transparent, always-on-top 
 
 Break and hydration reminders count active desk time. When the Mac locks or sleeps, PawPal clears the current reminder countdown; after unlock or wake, the countdown starts again from the full interval. This avoids stale reminders firing immediately after you step away, commute, or log back in.
 
+### What's New
+
+- Yellow Dog can now connect to Claude Code activity
+- White Line Dog remains linked to Codex status
+- Agent bubbles and chat cards can jump back to the matching Codex or Claude Code chat
+- Agent status bubbles use clearer text color for better readability
+- Release builds now include a Windows `.exe` installer
+
 ### Install
 
 Download the latest installer from [Releases](../../releases):
 
 | File | Platform |
 |------|----------|
-| `PawPal-0.3.0-effy.1-arm64.dmg` | macOS Apple Silicon |
-| `PawPal-0.3.0-effy.1.dmg` | macOS Intel / universal build |
-| Not provided in this release | Windows 64-bit; build from source on Windows with `pnpm dist:win` |
+| `PawPal-0.3.0-effy.2-arm64.dmg` | macOS Apple Silicon |
+| `PawPal-0.3.0-effy.2.dmg` | macOS Intel / universal build |
+| `PawPal-0.3.0-effy.2-setup-x64.exe` | Windows 64-bit |
 
 > **macOS**: On first launch, macOS may say the developer cannot be verified. Allow the app in System Settings -> Privacy & Security. Focus distraction detection also requires Accessibility permission.
 >
@@ -63,7 +71,7 @@ Download the latest installer from [Releases](../../releases):
 >
 > To make a `.dmg` that opens cleanly for other people, sign it with an Apple Developer ID certificate and submit it for Apple notarization.
 >
-> **Windows**: a prebuilt Windows installer is not provided for this fork release. Build it from source on Windows with `pnpm dist:win`. Distraction detection is not supported yet; the rest of the app works normally.
+> **Windows**: download the `.exe` installer from Releases. Distraction detection is not supported yet; the rest of the app works normally. Unsigned Windows builds may show a SmartScreen warning.
 
 ### Run From Source
 
@@ -119,11 +127,13 @@ pnpm dist:mac     # package macOS only
 pnpm dist:win     # package Windows only; on macOS this may require Wine
 ```
 
-### Codex Activity Bridge
+Release builds are produced by GitHub Actions on native runners: macOS artifacts are built on `macos-latest`, and the Windows `.exe` is built on `windows-latest`. Pushing a `v*` tag creates a draft GitHub Release with all installers attached.
 
-PawPal can reflect your live Codex work directly in the pet UI. When Codex is active, the pet shows a compact status badge; hover it for a manga-style thought bubble with the current chat summary, or double-click to jump back to that Codex chat.
+### Agent Activity Bridge
 
-If several Codex chats are active, PawPal groups them behind a count badge that can expand into separate chat cards. Break, hydration, and focus reminders still take priority, so health nudges never get buried behind coding status.
+PawPal can reflect live coding-agent work directly in the pet UI. White Line Dog is linked to Codex status; Yellow Dog is linked to Claude Code status. When an agent is active, the pet shows a compact status badge; hover it for a manga-style thought bubble with the current chat summary.
+
+If several chats are active, PawPal groups them behind a count badge that can expand into separate chat cards. Agent bubbles and chat cards can open the matching Codex or Claude Code chat. Break, hydration, and focus reminders still take priority, so health nudges never get buried behind coding status.
 
 ### Tech Stack
 
@@ -149,8 +159,8 @@ pet_assets/     Pet animation assets (GIF)
 - [ ] Sound effects
 - [ ] Windows distraction detection
 - [ ] Slack linkage
-- [ ] More Codex status controls
-- [ ] Rich Codex activity subtitles for file reads, file lists, searches, file edits, tool calls, and web searches
+- [x] Pet-linked agent activity: White Line Dog for Codex, Yellow Dog for Claude Code
+- [x] Rich Codex activity subtitles for file reads, file lists, searches, file edits, tool calls, and web searches
 
 ### License
 
@@ -169,10 +179,10 @@ PawPal 是一款支持 macOS 和 Windows 的桌面宠物应用。一只透明、
 - **休息提醒** — 按设定时间提醒你站起来活动；小狗可以跑过屏幕来吸引注意
 - **喝水提醒** — 温和提醒你补充水分
 - **专注模式** — 检测当前使用的应用；如果你切到社交媒体，小狗会提醒你回到工作状态
-- **Codex 状态** — 自动读取 Codex 会话日志，汇总活跃聊天，识别等待执行计划的状态，用漫画风思考泡泡显示悬停详情，可点击展开多个聊天状态，并可双击跳转到对应 Codex 聊天
+- **Agent 状态** — 白色线条小狗读取 Codex 会话日志；黄色小狗读取 Claude Code 记录，并用同一套思考泡泡显示活跃聊天、读文件、搜索、改文件、调用工具和网页搜索
 - **桌宠大小调整** — 鼠标移到宠物窗口右下角会出现调整手柄，拖动即可放大或缩小 PawPal
-- **多种宠物外观** — 包含线条小狗、金毛 puppy、小鸡毛，也支持为每个宠物状态上传自定义 GIF
-- **设置仪表盘** — 记录当天休息、喝水、专注分钟和分心提醒次数，并提供 Codex 与专注检测运行诊断
+- **多种宠物外观** — 包含白色线条小狗、黄色小狗、金毛 puppy、小鸡毛，也支持为每个宠物状态上传自定义 GIF
+- **设置仪表盘** — 记录当天休息、喝水、专注分钟和分心提醒次数，并提供 Agent 状态与专注检测运行诊断
 - **系统控制** — 支持开机自启、手动或启动时检查更新、提醒时间配置、分心应用和关键词配置
 - **中文 / English 界面**
 - **本地优先** — 设置和统计数据保存在本机；只有手动检查更新或开启启动时检查更新时，PawPal 才会访问 GitHub Releases
@@ -181,15 +191,23 @@ PawPal 是一款支持 macOS 和 Windows 的桌面宠物应用。一只透明、
 
 休息和喝水提醒按实际桌面使用时间计时。Mac 锁屏或进入睡眠时，PawPal 会清空当前提醒倒计时；解锁或唤醒后，倒计时会从完整间隔重新开始。这样你短暂离开、合盖通勤或重新登录后，不会立刻收到已经过期的提醒。
 
+### 本次更新
+
+- 黄色小狗现在可以连接 Claude Code 状态
+- 白色线条小狗继续对应 Codex 状态
+- Agent 状态泡泡和聊天卡片可以跳回对应的 Codex 或 Claude Code 聊天
+- Agent 状态泡泡文字颜色更清晰，阅读性更好
+- Release 现在包含 Windows `.exe` 安装包
+
 ### 安装
 
 从 [Releases](../../releases) 下载对应平台的安装包：
 
 | 文件 | 适用设备 |
 |------|----------|
-| `PawPal-0.3.0-effy.1-arm64.dmg` | macOS Apple Silicon |
-| `PawPal-0.3.0-effy.1.dmg` | macOS Intel / universal build |
-| 本版本未提供 | Windows 64 位；请在 Windows 上用 `pnpm dist:win` 从源码构建 |
+| `PawPal-0.3.0-effy.2-arm64.dmg` | macOS Apple Silicon |
+| `PawPal-0.3.0-effy.2.dmg` | macOS Intel / universal build |
+| `PawPal-0.3.0-effy.2-setup-x64.exe` | Windows 64 位 |
 
 > **macOS**：首次打开时，系统可能提示“无法验证开发者”。请到“系统设置 -> 隐私与安全性”中允许打开。专注模式的分心检测还需要授予“辅助功能”权限。
 >
@@ -202,7 +220,7 @@ PawPal 是一款支持 macOS 和 Windows 的桌面宠物应用。一只透明、
 >
 > 如果希望分享出去的 `.dmg` 可以直接双击打开，需要使用 Apple Developer ID 证书签名，并提交 Apple 公证。
 >
-> **Windows**：本 fork 暂未提供预编译的 Windows 安装包。如需 Windows 版本，请在 Windows 环境下运行 `pnpm dist:win` 自行构建。分心检测目前仍不支持 Windows，其余功能可正常使用。
+> **Windows**：从 Releases 下载 `.exe` 安装包即可。分心检测目前仍不支持 Windows，其余功能可正常使用。未签名的 Windows 构建可能会触发 SmartScreen 提示。
 
 ### 从源码运行
 
@@ -258,11 +276,13 @@ pnpm dist:mac     # 仅打包 macOS
 pnpm dist:win     # 仅打包 Windows；在 macOS 上可能需要 Wine
 ```
 
-### Codex 状态联动
+正式发布包由 GitHub Actions 在原生 runner 上构建：macOS 安装包由 `macos-latest` 构建，Windows `.exe` 由 `windows-latest` 构建。推送 `v*` tag 后会自动创建带全部安装包附件的 draft GitHub Release。
 
-PawPal 可以把你的 Codex 工作状态直接显示在桌宠 UI 里。Codex 活跃时，小狗会显示一个简洁的状态徽标；鼠标悬停可用漫画风思考泡泡查看当前聊天摘要，双击则可跳回对应的 Codex 聊天。
+### Agent 状态联动
 
-如果多个 Codex 聊天同时活跃，PawPal 会先显示数量徽标，点击后展开为独立聊天卡片。休息、喝水和专注提醒仍然优先显示，所以健康提醒不会被编码状态挡住。
+PawPal 可以把 coding agent 的工作状态直接显示在桌宠 UI 里。白色线条小狗对应 Codex 状态，黄色小狗对应 Claude Code 状态。Agent 活跃时，桌宠会显示一个简洁的状态徽标；鼠标悬停可用漫画风思考泡泡查看当前聊天摘要。
+
+如果多个聊天同时活跃，PawPal 会先显示数量徽标，点击后展开为独立聊天卡片。Agent 状态泡泡和聊天卡片可以跳回对应的 Codex 或 Claude Code 聊天。休息、喝水和专注提醒仍然优先显示，所以健康提醒不会被编码状态挡住。
 
 ### 技术栈
 
@@ -288,8 +308,8 @@ pet_assets/     宠物动画素材（GIF）
 - [ ] 声音效果
 - [ ] Windows 分心检测
 - [ ] Slack 联动
-- [ ] 更多 Codex 状态控制
-- [ ] 更丰富的 Codex 活动副标题：读文件、列文件、搜索、改文件、调用工具和网页搜索
+- [x] 按宠物形象切换 Agent 状态：白色线条小狗对应 Codex，黄色小狗对应 Claude Code
+- [x] 更丰富的 Codex 活动副标题：读文件、列文件、搜索、改文件、调用工具和网页搜索
 
 ### 许可
 

@@ -68,5 +68,19 @@ export const tests = [
         }
       }
     }
+  },
+  {
+    name: "quit animation uses yellow asset for non-line dogs and white asset for Line Dog",
+    run(): void {
+      assert.deepEqual(pathsFor("lovartPuppy", "quitRunning"), [
+        "pet_assets/线条小狗/quitRunning/running_dog_left.gif"
+      ]);
+      assert.deepEqual(pathsFor("xiaoJiMao", "quitRunning"), [
+        "pet_assets/线条小狗/quitRunning/running_dog_left.gif"
+      ]);
+      assert.deepEqual(pathsFor("lineDog", "quitRunning"), [
+        "pet_assets/线条小狗/quitRunning/running_dog_right.gif"
+      ]);
+    }
   }
 ];

@@ -49,6 +49,7 @@ export function useSnapshot(): AppSnapshot {
       message: null,
       updatedAt: null,
       path: "",
+      provider: "codex",
       source: "manual",
       sessions: []
     },

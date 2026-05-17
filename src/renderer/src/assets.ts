@@ -37,10 +37,7 @@ export function getPetAsset(
   const resolvedAppearanceId = resolvePetAppearanceId(appearanceId);
   const asset = getPetAssetDefinition(resolvedAppearanceId, state, custom);
   const paths = normalizeAssetPaths(asset.path);
-  const selectedPath =
-    state === "quitRunning" && resolvedAppearanceId !== "custom" && facing === "left"
-      ? "pet_assets/线条小狗/quitRunning/running_dog_left.gif"
-      : paths[Math.abs(variantIndex) % paths.length];
+  const selectedPath = paths[Math.abs(variantIndex) % paths.length];
   const warningKey = `${resolvedAppearanceId}:${state}`;
 
   if (asset.isPlaceholder && !warnedPlaceholders.has(warningKey)) {

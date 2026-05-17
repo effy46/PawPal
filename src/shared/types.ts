@@ -7,6 +7,7 @@ export type PetAppearanceId = BuiltInPetAppearanceId | "custom";
 export type PetFacing = "left" | "right";
 
 export type CodexActivityState = "idle" | "working" | "reviewing" | "complete" | "waiting" | "error";
+export type AgentActivityProvider = "codex" | "claude";
 
 export type CodexActivitySession = {
   id: string;
@@ -22,7 +23,8 @@ export type CodexActivity = {
   message: string | null;
   updatedAt: number | null;
   path: string;
-  source: "manual" | "codex-session";
+  provider: AgentActivityProvider;
+  source: "manual" | "codex-session" | "claude-session";
   sessions: CodexActivitySession[];
 };
 

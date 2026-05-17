@@ -29,6 +29,7 @@ import type {
   CodexActivity,
   CodexActivitySession,
   CodexActivityState,
+  AgentActivityProvider,
   CustomPetAsset,
   DistractionStatus,
   DemoTrigger,
@@ -90,6 +91,8 @@ type StoreSchema = {
   petPosition?: SavedWindowPosition;
   petScale?: number;
 };
+
+type SettingsCopy = ReturnType<typeof i18n>["settings"];
 
 type PetPosition = {
   x: number;
@@ -195,6 +198,14 @@ function codexSessionIndexPath(): string {
   return join(app.getPath("home"), ".codex", "session_index.jsonl");
 }
 
+function claudeProjectsRoot(): string {
+  return join(app.getPath("home"), ".claude", "projects");
+}
+
+function claudeCodeSessionsRoot(): string {
+  return join(app.getPath("appData"), "Claude", "claude-code-sessions");
+}
+
 function codexSessionSearchRoots(): string[] {
   return Array.from({ length: 7 }, (_unused, offset) => {
     const date = new Date(Date.now() - offset * 24 * 60 * 60 * 1000);
@@ -212,6 +223,7 @@ let codexActivity: CodexActivity = {
   message: null,
   updatedAt: null,
   path: codexActivityPath(),
+  provider: "codex",
   source: "manual",
   sessions: []
 };
@@ -232,6 +244,8 @@ type CodexSessionEvent = {
     type?: string;
     isCompleted?: boolean;
     name?: string;
+    arguments?: string;
+    call_id?: string;
     role?: string;
     message?: string;
     last_agent_message?: string;
@@ -239,6 +253,48 @@ type CodexSessionEvent = {
     cwd?: string;
     turn_id?: string;
   };
+};
+
+type CodexToolActivity =
+  | { type: "readFile"; fileName: string }
+  | { type: "listFiles" }
+  | { type: "searchFiles"; query: string | null }
+  | { type: "editFiles"; fileCount: number }
+  | { type: "webSearch"; query: string | null }
+  | { type: "toolCall"; toolName: string | null }
+  | { type: "command" };
+
+type ClaudeContentBlock = {
+  type?: string;
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  text?: string;
+  tool_use_id?: string;
+  is_error?: boolean;
+  content?: unknown;
+};
+
+type ClaudeSessionEvent = {
+  type?: string;
+  uuid?: string;
+  sessionId?: string;
+  cwd?: string;
+  timestamp?: string;
+  summary?: string;
+  title?: string;
+  name?: string;
+  lastPrompt?: string;
+  message?: {
+    role?: string;
+    content?: string | ClaudeContentBlock[];
+  };
+};
+
+type ClaudeCodeSessionMetadata = {
+  cliSessionId?: string;
+  title?: string;
+  lastActivityAt?: number;
 };
 
 function codexActivityFreshMs(state: CodexActivityState): number {
@@ -296,6 +352,25 @@ function text(): ReturnType<typeof i18n> {
   return i18n(getSettings().language);
 }
 
+function agentActivityProviderForPet(): AgentActivityProvider | null {
+  const appearanceId = getSettings().petAppearanceId;
+  if (appearanceId === "lineDog") return "codex";
+  if (appearanceId === "xiaoJiMao") return "claude";
+  return null;
+}
+
+function emptyAgentActivity(provider: AgentActivityProvider = "codex"): CodexActivity {
+  return {
+    state: "idle",
+    message: null,
+    updatedAt: null,
+    path: provider === "claude" ? claudeProjectsRoot() : codexActivityPath(),
+    provider,
+    source: "manual",
+    sessions: []
+  };
+}
+
 function setSettings(next: Settings): void {
   const normalized = normalizeSettings(next);
   applyLaunchAtLoginPreference(normalized.launchAtLoginEnabled);
@@ -305,6 +380,7 @@ function setSettings(next: Settings): void {
   scheduleReminderTimers();
   scheduleDistractionDetection();
   updateTrayMenu();
+  void pollCodexActivity();
 }
 
 function getSettingsWithSystemState(): Settings {
@@ -432,10 +508,13 @@ function isCodexActivityState(value: unknown): value is CodexActivityState {
 function normalizeCodexActivity(value: unknown): CodexActivity {
   const path = codexActivityPath();
   if (!value || typeof value !== "object") {
-    return { state: "idle", message: null, updatedAt: null, path, source: "manual", sessions: [] };
+    return { state: "idle", message: null, updatedAt: null, path, provider: "codex", source: "manual", sessions: [] };
   }
   const source = value as Partial<CodexActivity>;
   const state = isCodexActivityState(source.state) ? source.state : "idle";
+  const provider = source.provider === "claude" ? "claude" : "codex";
+  const activitySource =
+    source.source === "codex-session" || source.source === "claude-session" ? source.source : "manual";
   const sessions = Array.isArray(source.sessions)
     ? source.sessions
         .filter((session): session is CodexActivitySession => {
@@ -456,7 +535,8 @@ function normalizeCodexActivity(value: unknown): CodexActivity {
     message: typeof source.message === "string" && source.message.trim() ? source.message.trim() : null,
     updatedAt: typeof source.updatedAt === "number" ? source.updatedAt : Date.now(),
     path,
-    source: source.source === "codex-session" ? "codex-session" : "manual",
+    provider,
+    source: activitySource,
     sessions
   };
 }
@@ -467,6 +547,7 @@ function setCodexActivity(next: CodexActivity): void {
     codexActivity.message !== next.message ||
     codexActivity.updatedAt !== next.updatedAt ||
     codexActivity.path !== next.path ||
+    codexActivity.provider !== next.provider ||
     codexActivity.source !== next.source ||
     JSON.stringify(codexActivity.sessions) !== JSON.stringify(next.sessions);
   if (!changed) return;
@@ -486,6 +567,7 @@ async function readStoredCodexActivity(): Promise<CodexActivity | null> {
       message: error instanceof Error ? error.message : String(error),
       updatedAt: Date.now(),
       path: codexActivityPath(),
+      provider: "codex",
       source: "manual",
       sessions: []
     };
@@ -504,6 +586,7 @@ async function writeCodexActivityDemo(state: CodexActivityState, message: string
     message,
     updatedAt: Date.now(),
     path: codexActivityPath(),
+    provider: agentActivityProviderForPet() ?? "codex",
     source: "manual",
     sessions: []
   };
@@ -557,6 +640,32 @@ async function findCodexSessionFiles(directory: string): Promise<Array<{ path: s
     if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
     const entryStat = await stat(entryPath);
     files.push({ path: entryPath, mtimeMs: entryStat.mtimeMs });
+  }
+  return files;
+}
+
+async function findJsonFiles(directory: string): Promise<Array<{ path: string; mtimeMs: number }>> {
+  let entries: Dirent[];
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const files: Array<{ path: string; mtimeMs: number }> = [];
+  for (const entry of entries) {
+    const entryPath = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await findJsonFiles(entryPath)));
+      continue;
+    }
+    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+    try {
+      const entryStat = await stat(entryPath);
+      files.push({ path: entryPath, mtimeMs: entryStat.mtimeMs });
+    } catch {
+      // Session metadata can disappear while Claude is updating it.
+    }
   }
   return files;
 }
@@ -622,23 +731,200 @@ function parseCodexSessionEvents(raw: string): CodexSessionEvent[] {
   return events;
 }
 
-function messageForCodexSessionEvent(event: CodexSessionEvent): string | null {
+function parseCodexToolArguments(value: string | undefined): Record<string, unknown> {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function firstString(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = firstString(item);
+      if (found) return found;
+    }
+  }
+  if (value && typeof value === "object") {
+    for (const item of Object.values(value)) {
+      const found = firstString(item);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function compactCodexText(value: string | null, maxLength = 48): string | null {
+  const compact = value?.replace(/\s+/g, " ").trim();
+  if (!compact) return null;
+  return compact.length <= maxLength ? compact : `${compact.slice(0, maxLength - 1)}...`;
+}
+
+function shellTokens(command: string): string[] {
+  return command
+    .match(/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'|\S+/g)
+    ?.map((token) => token.replace(/^["']|["']$/g, ""))
+    .filter(Boolean) ?? [];
+}
+
+function basenameFromToken(token: string | null): string | null {
+  if (!token) return null;
+  const clean = token.replace(/[),;]+$/g, "");
+  if (!clean || clean.startsWith("-") || /^[0-9,]+[a-z]?$/i.test(clean)) return null;
+  const name = basename(clean);
+  return compactCodexText(name);
+}
+
+function fileNameFromShellTokens(tokens: string[]): string | null {
+  for (let index = tokens.length - 1; index >= 1; index -= 1) {
+    const token = tokens[index];
+    if (token === "|" || token === "&&" || token === "||") break;
+    const name = basenameFromToken(token);
+    if (name) return name;
+  }
+  return null;
+}
+
+function searchQueryFromShellTokens(tokens: string[]): string | null {
+  const command = basename(tokens[0] ?? "");
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!token || token === "|" || token === "&&" || token === "||") break;
+    if (token.startsWith("-")) continue;
+    if ((command === "rg" || command === "grep") && tokens[index - 1]?.startsWith("--glob")) continue;
+    return compactCodexText(token);
+  }
+  return null;
+}
+
+function classifyShellCommand(command: string): CodexToolActivity {
+  const tokens = shellTokens(command);
+  const executable = basename(tokens[0] ?? "");
+  if (!executable) return { type: "command" };
+
+  if (executable === "rg" && tokens.includes("--files")) return { type: "listFiles" };
+  if (["ls", "find", "fd", "tree"].includes(executable)) return { type: "listFiles" };
+  if (["rg", "grep", "ag", "ack"].includes(executable)) {
+    return { type: "searchFiles", query: searchQueryFromShellTokens(tokens) };
+  }
+  if (["cat", "sed", "nl", "head", "tail", "less", "more"].includes(executable)) {
+    const fileName = fileNameFromShellTokens(tokens);
+    if (fileName) return { type: "readFile", fileName };
+  }
+
+  return { type: "command" };
+}
+
+function countPatchFiles(patch: string): number {
+  const matches = patch.match(/^\*\*\* (?:Add|Update|Delete) File: /gm);
+  return Math.max(1, matches?.length ?? 0);
+}
+
+function toolNameForDisplay(name: string | undefined): string | null {
+  if (!name) return null;
+  const compact = name
+    .replace(/^functions\./, "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return compactCodexText(compact);
+}
+
+function classifyCodexFunctionCall(event: CodexSessionEvent): CodexToolActivity | null {
+  const payload = event.payload;
+  if (payload?.type !== "function_call") return null;
+
+  const args = parseCodexToolArguments(payload.arguments);
+  const name = payload.name;
+
+  if (name === "exec_command") {
+    const command = typeof args.cmd === "string" ? args.cmd : null;
+    return command ? classifyShellCommand(command) : { type: "command" };
+  }
+
+  if (name === "apply_patch") return { type: "editFiles", fileCount: countPatchFiles(payload.arguments ?? "") };
+
+  if (name === "web.run" || name === "web_run" || name === "search_query" || name === "image_query") {
+    return { type: "webSearch", query: compactCodexText(firstString(args.search_query ?? args.image_query ?? args.q)) };
+  }
+
+  if (args.search_query || args.image_query) {
+    return { type: "webSearch", query: compactCodexText(firstString(args.search_query ?? args.image_query)) };
+  }
+
+  return { type: "toolCall", toolName: toolNameForDisplay(name) };
+}
+
+function functionCallForOutput(events: CodexSessionEvent[], outputIndex: number): CodexSessionEvent | null {
+  const callId = events[outputIndex]?.payload?.call_id;
+  for (let index = outputIndex - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.payload?.type !== "function_call") continue;
+    if (callId && event.payload.call_id !== callId) continue;
+    return event;
+  }
+  return null;
+}
+
+function messageForCodexToolActivity(
+  activity: CodexToolActivity,
+  labels: SettingsCopy,
+  running: boolean
+): string {
+  switch (activity.type) {
+    case "readFile":
+      return running ? labels.codexReadingFile(activity.fileName) : labels.codexReadFile(activity.fileName);
+    case "listFiles":
+      return running ? labels.codexListingFiles : labels.codexListedFiles;
+    case "searchFiles":
+      if (activity.query) {
+        return running ? labels.codexSearchingQuery(activity.query) : labels.codexSearchedQuery(activity.query);
+      }
+      return running ? labels.codexSearchingFiles : labels.codexSearchedFiles;
+    case "editFiles":
+      return running ? labels.codexEditingFiles(activity.fileCount) : labels.codexEditedFiles(activity.fileCount);
+    case "webSearch":
+      if (activity.query) {
+        return running ? labels.codexSearchingQuery(activity.query) : labels.codexSearchedQuery(activity.query);
+      }
+      return running ? labels.codexSearchingWeb : labels.codexSearchedWeb;
+    case "toolCall":
+      return running ? labels.codexCallingTool(activity.toolName) : labels.codexCalledTool(activity.toolName);
+    case "command":
+      return running ? labels.codexRunningCommand : labels.codexRanCommand;
+  }
+}
+
+function messageForCodexSessionEvent(
+  event: CodexSessionEvent,
+  labels: SettingsCopy,
+  events: CodexSessionEvent[] = [],
+  eventIndex = -1
+): string | null {
   const payload = event.payload;
   if (!payload) return null;
-  if (payload.type === "planImplementation" && payload.isCompleted !== true) return "Plan ready";
+  if (payload.type === "planImplementation" && payload.isCompleted !== true) return labels.codexPlanReady;
   if (payload.type === "function_call" && payload.name === "request_user_input") {
-    return "Needs your reply";
+    return labels.codexNeedsReply;
   }
   if (payload.type === "function_call") {
-    return payload.name ? `Running ${payload.name}` : "Running a tool";
+    const activity = classifyCodexFunctionCall(event);
+    return activity ? messageForCodexToolActivity(activity, labels, true) : labels.codexRunningTool(payload.name ?? null);
   }
-  if (payload.type === "function_call_output") return "Reviewing tool output";
-  if (payload.type === "agent_message") return "Writing response";
-  if (payload.type === "user_message") return "Reading prompt";
-  if (payload.type === "task_started") return "Working";
-  if (payload.type === "task_complete") return "Waiting for next prompt";
-  if (payload.type === "reasoning") return "Thinking";
-  if (payload.type === "message" && payload.role === "assistant") return "Writing response";
+  if (payload.type === "function_call_output") {
+    const call = functionCallForOutput(events, eventIndex);
+    const activity = call ? classifyCodexFunctionCall(call) : null;
+    return activity ? messageForCodexToolActivity(activity, labels, false) : labels.codexReviewingToolOutput;
+  }
+  if (payload.type === "agent_message") return labels.codexWritingResponse;
+  if (payload.type === "user_message") return labels.codexReadingPrompt;
+  if (payload.type === "task_started") return labels.codexWorkingMessage;
+  if (payload.type === "task_complete") return labels.codexWaitingForNextPrompt;
+  if (payload.type === "reasoning") return labels.codexWorking;
+  if (payload.type === "message" && payload.role === "assistant") return labels.codexWritingResponse;
   return null;
 }
 
@@ -701,6 +987,7 @@ async function inferCodexSessionFileActivity(file: {
   path: string;
   mtimeMs: number;
 }, titleMap: Map<string, string>): Promise<CodexActivitySession | null> {
+  const labels = text().settings;
   const [head, tail] = await Promise.all([
     readFileHead(file.path, 64 * 1024),
     readFileTail(file.path, CODEX_SESSION_TAIL_BYTES)
@@ -723,7 +1010,7 @@ async function inferCodexSessionFileActivity(file: {
       id,
       title: titleForCodexSession(events, file.path, id, titleMap),
       state,
-      message: messageForCodexSessionEvent(event),
+      message: messageForCodexSessionEvent(event, labels, events, index),
       updatedAt,
       path: file.path
     };
@@ -732,7 +1019,13 @@ async function inferCodexSessionFileActivity(file: {
   return null;
 }
 
-function aggregateCodexSessionActivity(sessions: CodexActivitySession[]): CodexActivity {
+function aggregateSessionActivity(
+  sessions: CodexActivitySession[],
+  labels: SettingsCopy,
+  provider: AgentActivityProvider,
+  source: "codex-session" | "claude-session"
+): CodexActivity {
+  const path = provider === "claude" ? claudeProjectsRoot() : codexActivityPath();
   const waiting = sessions.filter((session) => session.state === "waiting");
   const visibleSessions = [...sessions]
     .sort((left, right) => right.updatedAt - left.updatedAt)
@@ -743,11 +1036,12 @@ function aggregateCodexSessionActivity(sessions: CodexActivitySession[]): CodexA
       state: "waiting",
       message:
         waiting.length === 1
-          ? `Reply needed: ${topWaiting.title}`
-          : `${waiting.length} chats need your reply`,
+          ? labels.codexReplyNeeded(topWaiting.title)
+          : labels.codexChatsNeedReply(waiting.length),
       updatedAt: topWaiting.updatedAt,
-      path: codexActivityPath(),
-      source: "codex-session",
+      path,
+      provider,
+      source,
       sessions: visibleSessions
     };
   }
@@ -756,10 +1050,11 @@ function aggregateCodexSessionActivity(sessions: CodexActivitySession[]): CodexA
   if (topError) {
     return {
       state: "error",
-      message: `Blocked: ${topError.title}`,
+      message: labels.codexBlockedMessage(topError.title),
       updatedAt: topError.updatedAt,
-      path: codexActivityPath(),
-      source: "codex-session",
+      path,
+      provider,
+      source,
       sessions: visibleSessions
     };
   }
@@ -776,10 +1071,11 @@ function aggregateCodexSessionActivity(sessions: CodexActivitySession[]): CodexA
           ? topActive.message
             ? `${topActive.title}: ${topActive.message}`
             : topActive.title
-          : `${activeSessions.length} chats active`,
+          : labels.codexChatsActive(activeSessions.length),
       updatedAt: topActive.updatedAt,
-      path: codexActivityPath(),
-      source: "codex-session",
+      path,
+      provider,
+      source,
       sessions: visibleSessions
     };
   }
@@ -790,11 +1086,12 @@ function aggregateCodexSessionActivity(sessions: CodexActivitySession[]): CodexA
       state: "complete",
       message:
         visibleSessions.length === 1
-          ? `Ready: ${latestComplete.title}`
-          : `${visibleSessions.length} chats ready`,
+          ? labels.codexReadyMessage(latestComplete.title)
+          : labels.codexChatsReady(visibleSessions.length),
       updatedAt: latestComplete.updatedAt,
-      path: codexActivityPath(),
-      source: "codex-session",
+      path,
+      provider,
+      source,
       sessions: visibleSessions
     };
   }
@@ -805,20 +1102,14 @@ function aggregateCodexSessionActivity(sessions: CodexActivitySession[]): CodexA
       state: latest.state,
       message: latest.message ? `${latest.title}: ${latest.message}` : latest.title,
       updatedAt: latest.updatedAt,
-      path: codexActivityPath(),
-      source: "codex-session",
+      path,
+      provider,
+      source,
       sessions: visibleSessions
     };
   }
 
-  return {
-    state: "idle",
-    message: null,
-    updatedAt: null,
-    path: codexActivityPath(),
-    source: "manual",
-    sessions: []
-  };
+  return emptyAgentActivity(provider);
 }
 
 async function inferCodexSessionActivity(): Promise<CodexActivity | null> {
@@ -833,14 +1124,228 @@ async function inferCodexSessionActivity(): Promise<CodexActivity | null> {
   const sessions = (await Promise.all(files.map((file) => inferCodexSessionFileActivity(file, titleMap))))
     .filter((session): session is CodexActivitySession => Boolean(session));
   if (!sessions.length) return null;
-  return aggregateCodexSessionActivity(sessions);
+  return aggregateSessionActivity(sessions, text().settings, "codex", "codex-session");
+}
+
+function parseClaudeSessionEvents(raw: string): ClaudeSessionEvent[] {
+  const events: ClaudeSessionEvent[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      events.push(JSON.parse(line) as ClaudeSessionEvent);
+    } catch {
+      // Ignore a partial first line from tail reads.
+    }
+  }
+  return events;
+}
+
+function claudeContentBlocks(event: ClaudeSessionEvent): ClaudeContentBlock[] {
+  return Array.isArray(event.message?.content) ? event.message.content : [];
+}
+
+function textFromClaudeContent(value: string | ClaudeContentBlock[] | undefined): string | null {
+  if (typeof value === "string") return compactCodexText(value);
+  if (!Array.isArray(value)) return null;
+  const textBlock = value.find((block) => block.type === "text" && typeof block.text === "string");
+  return compactCodexText(textBlock?.text ?? null);
+}
+
+function classifyClaudeToolUse(block: ClaudeContentBlock): CodexToolActivity {
+  const input = block.input ?? {};
+  const name = block.name;
+  if (name === "Read") return { type: "readFile", fileName: basenameFromToken(firstString(input.file_path) ?? "") ?? "file" };
+  if (name === "LS") return { type: "listFiles" };
+  if (name === "Glob") return { type: "searchFiles", query: compactCodexText(firstString(input.pattern)) };
+  if (name === "Grep") return { type: "searchFiles", query: compactCodexText(firstString(input.pattern)) };
+  if (name === "Bash") {
+    const command = firstString(input.command);
+    return command ? classifyShellCommand(command) : { type: "command" };
+  }
+  if (name === "Edit" || name === "Write" || name === "NotebookEdit") return { type: "editFiles", fileCount: 1 };
+  if (name === "MultiEdit") {
+    const edits = input.edits;
+    return { type: "editFiles", fileCount: Array.isArray(edits) ? Math.max(1, edits.length) : 1 };
+  }
+  if (name === "WebFetch") {
+    return { type: "webSearch", query: compactCodexText(firstString(input.url) ?? firstString(input.prompt)) };
+  }
+  if (name === "WebSearch") return { type: "webSearch", query: compactCodexText(firstString(input.query)) };
+  return { type: "toolCall", toolName: toolNameForDisplay(name) };
+}
+
+function latestClaudeToolUse(events: ClaudeSessionEvent[], outputIndex: number, toolUseId?: string): ClaudeContentBlock | null {
+  for (let index = outputIndex - 1; index >= 0; index -= 1) {
+    for (const block of claudeContentBlocks(events[index]).slice().reverse()) {
+      if (block.type !== "tool_use") continue;
+      if (toolUseId && block.id !== toolUseId) continue;
+      return block;
+    }
+  }
+  return null;
+}
+
+function latestClaudeContentBlock(
+  blocks: ClaudeContentBlock[],
+  predicate: (block: ClaudeContentBlock) => boolean
+): ClaudeContentBlock | null {
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    if (predicate(blocks[index])) return blocks[index];
+  }
+  return null;
+}
+
+function stateForClaudeSessionEvent(event: ClaudeSessionEvent): CodexActivityState | null {
+  if (event.type === "assistant") {
+    const blocks = claudeContentBlocks(event);
+    if (blocks.some((block) => block.type === "tool_use")) return "working";
+    if (textFromClaudeContent(event.message?.content)) return "complete";
+  }
+  if (event.type === "user") {
+    const blocks = claudeContentBlocks(event);
+    if (blocks.some((block) => block.type === "tool_result" && block.is_error === true)) return "error";
+    if (blocks.some((block) => block.type === "tool_result")) return "reviewing";
+    if (textFromClaudeContent(event.message?.content)) return "working";
+  }
+  return null;
+}
+
+function messageForClaudeSessionEvent(
+  event: ClaudeSessionEvent,
+  labels: SettingsCopy,
+  events: ClaudeSessionEvent[],
+  eventIndex: number
+): string | null {
+  if (event.type === "assistant") {
+    const toolUse = latestClaudeContentBlock(claudeContentBlocks(event), (block) => block.type === "tool_use");
+    if (toolUse) return messageForCodexToolActivity(classifyClaudeToolUse(toolUse), labels, true);
+    if (textFromClaudeContent(event.message?.content)) return labels.codexWaitingForNextPrompt;
+  }
+
+  if (event.type === "user") {
+    const toolResult = latestClaudeContentBlock(claudeContentBlocks(event), (block) => block.type === "tool_result");
+    if (toolResult) {
+      const toolUse = latestClaudeToolUse(events, eventIndex, toolResult.tool_use_id);
+      const activity = toolUse ? classifyClaudeToolUse(toolUse) : { type: "toolCall", toolName: null } satisfies CodexToolActivity;
+      return messageForCodexToolActivity(activity, labels, false);
+    }
+    if (textFromClaudeContent(event.message?.content)) return labels.codexReadingPrompt;
+  }
+
+  return null;
+}
+
+function titleForClaudeSession(events: ClaudeSessionEvent[], filePath: string): string {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    const title = compactCodexText(firstString([event.title, event.summary, event.name, event.lastPrompt]), 42);
+    if (title) return title;
+  }
+  for (let index = 0; index < events.length; index += 1) {
+    if (events[index].type !== "user") continue;
+    const title = textFromClaudeContent(events[index].message?.content);
+    if (title) return title;
+  }
+  return basename(filePath, extname(filePath));
+}
+
+async function readClaudeCodeSessionTitles(sessionIds: Set<string>): Promise<Map<string, string>> {
+  if (!sessionIds.size) return new Map();
+  const files = (await findJsonFiles(claudeCodeSessionsRoot()))
+    .sort((left, right) => right.mtimeMs - left.mtimeMs)
+    .slice(0, 400);
+  const titles = new Map<string, { title: string; lastActivityAt: number }>();
+
+  for (const file of files) {
+    let metadata: ClaudeCodeSessionMetadata;
+    try {
+      metadata = JSON.parse(await readFile(file.path, "utf8")) as ClaudeCodeSessionMetadata;
+    } catch {
+      continue;
+    }
+
+    const sessionId = metadata.cliSessionId;
+    const title = compactCodexText(metadata.title ?? "General coding session", 42);
+    if (!sessionId || !sessionIds.has(sessionId) || !title) continue;
+    const lastActivityAt = typeof metadata.lastActivityAt === "number" ? metadata.lastActivityAt : file.mtimeMs;
+    const existing = titles.get(sessionId);
+    if (!existing || lastActivityAt >= existing.lastActivityAt) {
+      titles.set(sessionId, { title, lastActivityAt });
+    }
+  }
+
+  return new Map(Array.from(titles, ([sessionId, value]) => [sessionId, value.title]));
+}
+
+async function inferClaudeSessionFileActivity(file: {
+  path: string;
+  mtimeMs: number;
+}): Promise<CodexActivitySession | null> {
+  const labels = text().settings;
+  const [head, tail] = await Promise.all([
+    readFileHead(file.path, 64 * 1024),
+    readFileTail(file.path, CODEX_SESSION_TAIL_BYTES)
+  ]);
+  const events = parseClaudeSessionEvents(`${head}\n${tail}`);
+
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    const state = stateForClaudeSessionEvent(event);
+    if (!state) continue;
+
+    const updatedAt = event.timestamp ? Date.parse(event.timestamp) : file.mtimeMs;
+    if (!Number.isFinite(updatedAt)) return null;
+    if (Date.now() - updatedAt > codexActivityFreshMs(state)) return null;
+
+    const id = event.sessionId ?? basename(file.path, extname(file.path));
+    return {
+      id,
+      title: titleForClaudeSession(events, file.path),
+      state,
+      message: messageForClaudeSessionEvent(event, labels, events, index),
+      updatedAt,
+      path: file.path
+    };
+  }
+
+  return null;
+}
+
+async function inferClaudeSessionActivity(): Promise<CodexActivity | null> {
+  const files = (await findCodexSessionFiles(claudeProjectsRoot()))
+    .filter((file) => Date.now() - file.mtimeMs <= CODEX_SESSION_ACTIVE_STALE_MS)
+    .sort((left, right) => right.mtimeMs - left.mtimeMs)
+    .slice(0, 50);
+  if (!files.length) return null;
+
+  const sessions = (await Promise.all(files.map(inferClaudeSessionFileActivity)))
+    .filter((session): session is CodexActivitySession => Boolean(session));
+  if (!sessions.length) return null;
+  const titles = await readClaudeCodeSessionTitles(new Set(sessions.map((session) => session.id)));
+  const titledSessions = sessions.map((session) => ({
+    ...session,
+    title: titles.get(session.id) ?? session.title
+  }));
+  return aggregateSessionActivity(titledSessions, text().settings, "claude", "claude-session");
 }
 
 async function pollCodexActivity(): Promise<void> {
-  let [stored, inferred] = await Promise.all([
-    readStoredCodexActivity(),
-    inferCodexSessionActivity()
-  ]);
+  const provider = agentActivityProviderForPet();
+  if (!provider) {
+    setCodexActivity(emptyAgentActivity("codex"));
+    return;
+  }
+
+  let stored: CodexActivity | null = null;
+  let inferred: CodexActivity | null = null;
+  if (provider === "codex") {
+    [stored, inferred] = await Promise.all([
+      readStoredCodexActivity(),
+      inferCodexSessionActivity()
+    ]);
+  } else {
+    inferred = await inferClaudeSessionActivity();
+  }
 
   if (
     stored?.source === "codex-session" &&
@@ -864,14 +1369,7 @@ async function pollCodexActivity(): Promise<void> {
     return;
   }
 
-  setCodexActivity({
-    state: "idle",
-    message: null,
-    updatedAt: null,
-    path: codexActivityPath(),
-    source: "manual",
-    sessions: []
-  });
+  setCodexActivity(emptyAgentActivity(provider));
 }
 
 function scheduleCodexActivityPolling(): void {
@@ -1604,6 +2102,27 @@ function openCodexSession(sessionId: string): void {
   });
 }
 
+async function openClaudeSession(sessionId: string): Promise<void> {
+  const cliSessionId = sessionId.trim();
+  if (!CODEX_THREAD_ID_PATTERN.test(cliSessionId)) return;
+  await shell.openExternal(`claude://resume?session=${encodeURIComponent(cliSessionId)}&pawpal=${Date.now()}`);
+}
+
+async function openAgentSession(sessionId: string): Promise<void> {
+  try {
+    if (codexActivity.provider === "claude") {
+      await openClaudeSession(sessionId);
+      return;
+    }
+    if (codexActivity.provider === "codex") {
+      openCodexSession(sessionId);
+    }
+  } catch (error) {
+    console.error("Failed to open agent session:", error);
+    return;
+  }
+}
+
 function showUpdateAvailableNotice(result: UpdateCheckResult): void {
   if (blockingMode || result.status !== "available" || !result.latestVersion) return;
   ensurePetWindowVisible();
@@ -1869,7 +2388,8 @@ function registerIpc(): void {
   ipcMain.on("pet:drag-stop", stopPetDrag);
   ipcMain.on("pet:resize-start", startPetResize);
   ipcMain.on("pet:resize-stop", stopPetResize);
-  ipcMain.on("codex:open-session", (_event, sessionId: string) => openCodexSession(sessionId));
+  ipcMain.on("agent:open-session", (_event, sessionId: string) => openAgentSession(sessionId));
+  ipcMain.on("codex:open-session", (_event, sessionId: string) => openAgentSession(sessionId));
   ipcMain.on("pet:set-mouse-interactive", (_event, interactive: boolean) => {
     setPetMouseInteractive(interactive);
   });

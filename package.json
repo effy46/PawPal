@@ -1,6 +1,6 @@
 {
   "name": "pawpal",
-  "version": "0.3.0-effy.1",
+  "version": "0.3.0-effy.2",
   "description": "A tiny desktop dog that helps you pause before you burn out.",
   "author": "zebangeth",
   "license": "MIT",
@@ -34,6 +34,7 @@
       "target": [
         { "target": "nsis", "arch": ["x64"] }
       ],
+      "artifactName": "PawPal-${version}-setup-${arch}.${ext}",
       "icon": "build/icon.png"
     },
     "nsis": {
@@ -62,6 +63,7 @@
     ]
   },
   "dependencies": {
+    "@fontsource/huninn": "^5.2.4",
     "electron-store": "^10.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"

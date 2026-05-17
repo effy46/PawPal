@@ -1,5 +1,9 @@
 :root {
   color: #2d261f;
+  --font-bubble-popover: "Comic Sans MS", "Chalkboard SE", "Marker Felt", ui-rounded, system-ui,
+    sans-serif;
+  --font-bubble-title: inherit;
+  --font-bubble-ui: inherit;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
@@ -35,6 +39,14 @@ textarea {
   pointer-events: none;
   position: relative;
   width: calc(360px * var(--pet-scale, 1));
+}
+
+.pet-shell:lang(zh-CN) {
+  --font-bubble-popover: var(--font-bubble-ui);
+  --font-bubble-title: "Huninn", "SF Pro Rounded", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", ui-rounded, system-ui, sans-serif;
+  --font-bubble-ui: "SF Pro Rounded", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    ui-rounded, system-ui, sans-serif;
 }
 
 .pet-stage {
@@ -316,8 +328,9 @@ textarea {
   cursor: pointer;
   display: flex;
   flex-direction: column;
+  font-family: var(--font-bubble-ui);
   gap: 1px;
-  left: 110px;
+  left: var(--codex-anchor-left, 180px);
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0;
@@ -336,6 +349,7 @@ textarea {
 .codex-badge span {
   color: #2d261f;
   display: -webkit-box;
+  font-family: var(--font-bubble-title);
   font-size: 13px;
   font-weight: 600;
   line-height: 1.15;
@@ -413,17 +427,19 @@ textarea {
     0 10px 24px rgba(45, 38, 31, 0.12);
   color: #2d261f;
   cursor: pointer;
-  font-family: "Comic Sans MS", "Chalkboard SE", "Marker Felt", ui-rounded, system-ui, sans-serif;
-  left: 118px;
-  max-width: 248px;
-  min-height: 104px;
+  font-family: var(--font-bubble-popover);
+  -webkit-font-smoothing: antialiased;
+  left: var(--codex-anchor-left, 180px);
+  max-width: 284px;
+  min-height: 112px;
   overflow: visible;
-  padding: 20px 24px 18px;
+  padding: 22px 26px 20px;
   pointer-events: auto;
   position: absolute;
   text-align: center;
-  transform: translateX(-50%) rotate(1deg);
-  width: 248px;
+  text-rendering: geometricPrecision;
+  transform: translateX(-50%);
+  width: 284px;
   z-index: 4;
 }
 
@@ -470,6 +486,7 @@ textarea {
 .codex-detail-popover header span {
   color: #2d261f;
   display: -webkit-box;
+  font-family: var(--font-bubble-title);
   font-size: 13px;
   font-weight: 750;
   letter-spacing: 0;
@@ -486,7 +503,7 @@ textarea {
 
 .codex-detail-popover header strong,
 .codex-detail-more {
-  color: #6e6457;
+  color: #4f5f57;
   font-size: 10px;
   font-style: normal;
   font-weight: 700;
@@ -496,14 +513,34 @@ textarea {
   white-space: nowrap;
 }
 
+.codex-detail-popover--working header strong {
+  color: #244e45;
+}
+
+.codex-detail-popover--reviewing header strong {
+  color: #7b551f;
+}
+
+.codex-detail-popover--waiting header strong {
+  color: #70551d;
+}
+
+.codex-detail-popover--error header strong {
+  color: #a8462d;
+}
+
+.codex-detail-popover--complete header strong {
+  color: #244e45;
+}
+
 .codex-detail-popover p {
-  color: #3b3025;
+  color: #4a3d31;
   display: -webkit-box;
-  font-size: 11px;
-  font-weight: 650;
-  line-height: 1.22;
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1.34;
   margin: 8px auto 0;
-  max-width: 184px;
+  max-width: 214px;
   overflow: hidden;
   position: relative;
   text-align: center;
@@ -532,6 +569,7 @@ textarea {
   color: #2d261f;
   cursor: pointer;
   display: flex;
+  font-family: var(--font-bubble-ui);
   font-size: 12px;
   font-weight: 650;
   height: 30px;
@@ -575,7 +613,7 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  left: 142px;
+  left: var(--codex-anchor-left, 180px);
   max-height: 160px;
   overflow: hidden;
   pointer-events: auto;
@@ -605,6 +643,7 @@ textarea {
   color: #2d261f;
   cursor: pointer;
   display: grid;
+  font-family: var(--font-bubble-ui);
   grid-template-columns: minmax(0, 1fr) 12px;
   line-height: 1.2;
   min-height: 48px;
@@ -625,12 +664,31 @@ textarea {
 }
 
 .codex-chat-card span {
+  font-family: var(--font-bubble-title);
   font-size: 13px;
   font-weight: 600;
   grid-column: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.pet-shell:lang(zh-CN) .codex-badge span,
+.pet-shell:lang(zh-CN) .codex-chat-card span {
+  font-weight: 400;
+}
+
+.pet-shell:lang(zh-CN) .codex-detail-popover header span {
+  font-size: 14px;
+  font-weight: 400;
+  text-transform: none;
+}
+
+.pet-shell:lang(zh-CN) .codex-detail-popover header strong,
+.pet-shell:lang(zh-CN) .codex-detail-more {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: none;
 }
 
 .codex-chat-card strong,
