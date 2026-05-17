@@ -1,9 +1,10 @@
 <p align="center">
   <img src="docs/social-preview.png" alt="PawPal" width="800" />
 </p>
-
+<p align="center">
+<img width="208" height="250" alt="image" src="https://github.com/user-attachments/assets/a0c8f3dc-40a4-41b8-895f-7929b59fc197" /><img width="218" height="258" alt="image" src="https://github.com/user-attachments/assets/383eba7d-662b-425f-8f65-52d08080228d" /><img width="166" height="178" alt="image" src="https://github.com/user-attachments/assets/43ed8c26-0d49-411e-8eab-a0264c5e9c84" /><img width="226" height="223" alt="image" src="https://github.com/user-attachments/assets/d455cc07-a891-4f23-b6f8-ec7c184050e3" />
 <h1 align="center">PawPal</h1>
-
+</p>
 <p align="center">
   A tiny desktop dog that helps you pause, hydrate, and stay focused.
 </p>
