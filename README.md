@@ -30,9 +30,9 @@ PawPal is a desktop pet app for macOS and Windows. A transparent, always-on-top 
 - **Break reminders** — timed nudges to get up and move; the dog can run across your screen to get your attention
 - **Hydration reminders** — gentle prompts to drink water
 - **Focus mode** — detects your active app; if you drift into social media, the dog nudges you back to work
-- **Agent activity** — White Line Dog watches Codex session logs; Yellow Dog watches Claude Code transcripts. PawPal summarizes active chats, file reads, searches, edits, tool calls, and web searches in the same thought-bubble UI
+- **Agent activity** — White Line Dog watches Codex session logs; Xiao Ji Mao watches Claude Code transcripts. PawPal summarizes active chats, file reads, searches, edits, tool calls, and web searches in the same thought-bubble UI; double-click a task bubble to jump to the matching agent chat
 - **Resizable desktop pet** — hover the lower-right corner of the pet window to reveal a resize handle, then drag to make PawPal bigger or smaller
-- **Multiple pet styles** — includes White Line Dog, Yellow Dog, Golden Puppy, Xiao Ji Mao, and custom GIF uploads for each pet state
+- **Multiple pet styles** — includes White Line Dog, Xiao Ji Mao, Golden Puppy, and custom GIF uploads for each pet state
 - **Settings dashboard** — tracks today's breaks, waters, focus minutes, and distraction warnings, with runtime diagnostics for agent activity and focus detection
 - **System controls** — launch-at-login, manual or startup update checks, configurable reminder timing, blocked apps, and blocked keywords
 - **Chinese / English UI**
@@ -44,7 +44,7 @@ Break and hydration reminders count active desk time. When the Mac locks or slee
 
 ### What's New
 
-- Yellow Dog can now connect to Claude Code activity
+- Xiao Ji Mao can now connect to Claude Code activity
 - White Line Dog remains linked to Codex status
 - Agent bubbles and chat cards can jump back to the matching Codex or Claude Code chat
 - Agent status bubbles use clearer text color for better readability
@@ -131,7 +131,7 @@ Release builds are produced by GitHub Actions on native runners: macOS artifacts
 
 ### Agent Activity Bridge
 
-PawPal can reflect live coding-agent work directly in the pet UI. White Line Dog is linked to Codex status; Yellow Dog is linked to Claude Code status. When an agent is active, the pet shows a compact status badge; hover it for a manga-style thought bubble with the current chat summary.
+PawPal can reflect live coding-agent work directly in the pet UI. White Line Dog is linked to Codex status; Xiao Ji Mao is linked to Claude Code status. When an agent is active, the pet shows a compact status badge; hover it for a manga-style thought bubble with the current chat summary.
 
 If several chats are active, PawPal groups them behind a count badge that can expand into separate chat cards. Agent bubbles and chat cards can open the matching Codex or Claude Code chat. Break, hydration, and focus reminders still take priority, so health nudges never get buried behind coding status.
 
@@ -155,12 +155,11 @@ pet_assets/     Pet animation assets (GIF)
 
 ### Roadmap
 
-- [ ] More built-in pet styles
+- [ ] More built-in pet styles, including Chiikawa
 - [ ] Sound effects
 - [ ] Windows distraction detection
 - [ ] Slack linkage
-- [x] Pet-linked agent activity: White Line Dog for Codex, Yellow Dog for Claude Code
-- [x] Rich Codex activity subtitles for file reads, file lists, searches, file edits, tool calls, and web searches
+- [ ] Calendar-aware Pomodoro mode with meeting countdowns and auto-muted reminders
 
 ### License
 
@@ -179,9 +178,9 @@ PawPal 是一款支持 macOS 和 Windows 的桌面宠物应用。一只透明、
 - **休息提醒** — 按设定时间提醒你站起来活动；小狗可以跑过屏幕来吸引注意
 - **喝水提醒** — 温和提醒你补充水分
 - **专注模式** — 检测当前使用的应用；如果你切到社交媒体，小狗会提醒你回到工作状态
-- **Agent 状态** — 白色线条小狗读取 Codex 会话日志；黄色小狗读取 Claude Code 记录，并用同一套思考泡泡显示活跃聊天、读文件、搜索、改文件、调用工具和网页搜索
+- **Agent 状态** — 白色线条小狗读取 Codex 会话日志；小鸡毛读取 Claude Code 记录，并用同一套思考泡泡显示活跃聊天、读文件、搜索、改文件、调用工具和网页搜索；双击任务泡泡可跳转到对应的 Agent 对话
 - **桌宠大小调整** — 鼠标移到宠物窗口右下角会出现调整手柄，拖动即可放大或缩小 PawPal
-- **多种宠物外观** — 包含白色线条小狗、黄色小狗、金毛 puppy、小鸡毛，也支持为每个宠物状态上传自定义 GIF
+- **多种宠物外观** — 包含白色线条小狗、小鸡毛、金毛 puppy，也支持为每个宠物状态上传自定义 GIF
 - **设置仪表盘** — 记录当天休息、喝水、专注分钟和分心提醒次数，并提供 Agent 状态与专注检测运行诊断
 - **系统控制** — 支持开机自启、手动或启动时检查更新、提醒时间配置、分心应用和关键词配置
 - **中文 / English 界面**
@@ -193,7 +192,7 @@ PawPal 是一款支持 macOS 和 Windows 的桌面宠物应用。一只透明、
 
 ### 本次更新
 
-- 黄色小狗现在可以连接 Claude Code 状态
+- 小鸡毛现在可以连接 Claude Code 状态
 - 白色线条小狗继续对应 Codex 状态
 - Agent 状态泡泡和聊天卡片可以跳回对应的 Codex 或 Claude Code 聊天
 - Agent 状态泡泡文字颜色更清晰，阅读性更好
@@ -280,7 +279,7 @@ pnpm dist:win     # 仅打包 Windows；在 macOS 上可能需要 Wine
 
 ### Agent 状态联动
 
-PawPal 可以把 coding agent 的工作状态直接显示在桌宠 UI 里。白色线条小狗对应 Codex 状态，黄色小狗对应 Claude Code 状态。Agent 活跃时，桌宠会显示一个简洁的状态徽标；鼠标悬停可用漫画风思考泡泡查看当前聊天摘要。
+PawPal 可以把 coding agent 的工作状态直接显示在桌宠 UI 里。白色线条小狗对应 Codex 状态，小鸡毛对应 Claude Code 状态。Agent 活跃时，桌宠会显示一个简洁的状态徽标；鼠标悬停可用漫画风思考泡泡查看当前聊天摘要。
 
 如果多个聊天同时活跃，PawPal 会先显示数量徽标，点击后展开为独立聊天卡片。Agent 状态泡泡和聊天卡片可以跳回对应的 Codex 或 Claude Code 聊天。休息、喝水和专注提醒仍然优先显示，所以健康提醒不会被编码状态挡住。
 
@@ -304,12 +303,11 @@ pet_assets/     宠物动画素材（GIF）
 
 ### 开发路线
 
-- [ ] 更多内置宠物外观
+- [ ] 更多内置宠物外观，包括 Chiikawa
 - [ ] 声音效果
 - [ ] Windows 分心检测
 - [ ] Slack 联动
-- [x] 按宠物形象切换 Agent 状态：白色线条小狗对应 Codex，黄色小狗对应 Claude Code
-- [x] 更丰富的 Codex 活动副标题：读文件、列文件、搜索、改文件、调用工具和网页搜索
+- [ ] 日历感知的番茄钟模式，包含会议倒计时和提醒自动静音
 
 ### 许可
 
