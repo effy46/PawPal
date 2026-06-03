@@ -39,6 +39,7 @@ export const tests = [
       const store = new MemoryStatsStore({
         date: "2026-05-05",
         breaksTaken: 1,
+        breakPromptsShown: 2,
         watersLogged: 2,
         focusMinutes: 3,
         focusWarnings: 4
@@ -56,6 +57,7 @@ export const tests = [
       const yesterday = {
         date: "2026-05-04",
         breaksTaken: 1,
+        breakPromptsShown: 1,
         watersLogged: 0,
         focusMinutes: 25,
         focusWarnings: 1
@@ -63,6 +65,7 @@ export const tests = [
       const today = {
         date: "2026-05-05",
         breaksTaken: 3,
+        breakPromptsShown: 4,
         watersLogged: 2,
         focusMinutes: 50,
         focusWarnings: 0
@@ -95,6 +98,7 @@ export const tests = [
       const store = new MemoryStatsStore({
         date: "2026-05-05",
         breaksTaken: 4,
+        breakPromptsShown: 5,
         watersLogged: 3,
         focusMinutes: 80,
         focusWarnings: 2
@@ -104,6 +108,23 @@ export const tests = [
 
       assert.equal(stats.breaksTaken, 0);
       assert.deepEqual(store.stats, createEmptyStats("2026-05-05"));
+    }
+  },
+  {
+    name: "getCurrentStats normalizes old stats without break prompt counts",
+    run(): void {
+      const store = new MemoryStatsStore({
+        date: "2026-05-05",
+        breaksTaken: 2,
+        watersLogged: 1,
+        focusMinutes: 10,
+        focusWarnings: 0
+      } as TodayStats);
+
+      const stats = getCurrentStats(store, "2026-05-05");
+
+      assert.equal(stats.breakPromptsShown, 2);
+      assert.equal(getStatsHistory(store)["2026-05-05"].breakPromptsShown, 2);
     }
   }
 ];

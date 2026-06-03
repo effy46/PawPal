@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   AppSnapshot,
+  AgentActivityProvider,
   CustomPetAsset,
   DemoTrigger,
   PetState,
@@ -29,13 +30,17 @@ const api = {
   pathForFile: (file: File): string => webUtils.getPathForFile(file),
   petClicked: (): void => ipcRenderer.send("pet:clicked"),
   petContextMenu: (): void => ipcRenderer.send("pet:context-menu"),
+  openSettings: (): void => ipcRenderer.send("app:open-settings"),
+  hideDog: (): void => ipcRenderer.send("pet:hide"),
+  quit: (): void => ipcRenderer.send("app:quit"),
   petDragStart: (offset: { offsetX: number; offsetY: number }): void =>
     ipcRenderer.send("pet:drag-start", offset),
   petDragStop: (): void => ipcRenderer.send("pet:drag-stop"),
   petResizeStart: (): void => ipcRenderer.send("pet:resize-start"),
   petResizeStop: (): void => ipcRenderer.send("pet:resize-stop"),
-  openAgentSession: (sessionId: string): void => ipcRenderer.send("agent:open-session", sessionId),
-  openCodexSession: (sessionId: string): void => ipcRenderer.send("agent:open-session", sessionId),
+  openAgentSession: (sessionId: string, provider?: AgentActivityProvider): void =>
+    ipcRenderer.send("agent:open-session", sessionId, provider),
+  openCodexSession: (sessionId: string): void => ipcRenderer.send("agent:open-session", sessionId, "codex"),
   setMouseInteractive: (interactive: boolean): void =>
     ipcRenderer.send("pet:set-mouse-interactive", interactive),
   bubbleAction: (actionId: string): void => ipcRenderer.send("bubble:action", actionId),

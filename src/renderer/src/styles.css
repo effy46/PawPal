@@ -2,10 +2,13 @@
   color: #2d261f;
   --font-bubble-popover: "Comic Sans MS", "Chalkboard SE", "Marker Felt", ui-rounded, system-ui,
     sans-serif;
-  --font-bubble-title: inherit;
-  --font-bubble-ui: inherit;
+  --font-bubble-title: Inter, "Huninn", "SF Pro Rounded", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", ui-rounded, system-ui, sans-serif;
+  --font-bubble-ui: Inter, "SF Pro Rounded", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", ui-rounded, system-ui, sans-serif;
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -84,14 +87,62 @@ textarea {
   object-fit: contain;
   pointer-events: none;
   position: relative;
-  transform: scaleX(1);
+  transform: translateY(var(--pet-asset-y, 0)) scale(var(--pet-asset-scale, 1)) scaleX(1);
   user-select: none;
   width: 184px;
   z-index: 1;
 }
 
 .pet-button.facing-left img {
-  transform: scaleX(-1);
+  transform: translateY(var(--pet-asset-y, 0)) scale(var(--pet-asset-scale, 1)) scaleX(-1);
+}
+
+.pet-context-menu {
+  background: rgba(255, 252, 244, 0.96);
+  border: 1px solid rgba(36, 78, 69, 0.16);
+  border-radius: 11px;
+  box-shadow: 0 10px 24px rgba(45, 38, 31, 0.16);
+  display: grid;
+  font-family: var(--font-bubble-ui);
+  gap: 2px;
+  left: var(--menu-left);
+  min-width: 148px;
+  padding: 6px;
+  pointer-events: auto;
+  position: absolute;
+  top: var(--menu-top);
+  transform: translate(-8px, -8px);
+  z-index: 10;
+}
+
+.pet-context-menu button {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  color: #2d261f;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 560;
+  line-height: 1.15;
+  padding: 8.5px 10px;
+  text-align: left;
+}
+
+.pet-context-menu button:hover {
+  background: rgba(16, 163, 127, 0.12);
+  color: #244e45;
+}
+
+.pet-context-menu button.is-danger:hover {
+  background: rgba(168, 70, 45, 0.12);
+  color: #a8462d;
+}
+
+.pet-context-menu span {
+  background: rgba(45, 38, 31, 0.1);
+  display: block;
+  height: 1px;
+  margin: 3px 2px;
 }
 
 .pet-resize-handle {
@@ -614,25 +665,13 @@ textarea {
   flex-direction: column;
   gap: 6px;
   left: var(--codex-anchor-left, 180px);
-  max-height: 160px;
+  max-height: 180px;
   overflow: hidden;
   pointer-events: auto;
   position: absolute;
   transform: translateX(-50%);
   width: 156px;
   z-index: 3;
-}
-
-.codex-chat-stack.has-more::after {
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0), #fff 82%);
-  bottom: 0;
-  content: "";
-  height: 38px;
-  left: 0;
-  pointer-events: none;
-  position: absolute;
-  right: 0;
-  z-index: 1;
 }
 
 .codex-chat-card {
@@ -741,47 +780,46 @@ textarea {
   width: 12px;
 }
 
-.codex-chat-more {
-  background: rgba(255, 252, 244, 0.92);
-  border: 1px solid rgba(45, 38, 31, 0.08);
-  border-radius: 999px;
-  bottom: 10px;
-  color: #6e6457;
-  font-size: 12px;
-  font-weight: 600;
-  left: 50%;
-  line-height: 1;
-  padding: 5px 10px;
-  position: absolute;
-  transform: translateX(-50%);
-  z-index: 2;
-}
-
-.codex-chat-latest {
-  background: rgba(255, 252, 244, 0.92);
-  border: 1px solid rgba(45, 38, 31, 0.08);
-  border-radius: 999px;
-  color: #6e6457;
-  font-size: 12px;
-  font-weight: 600;
-  left: 50%;
-  line-height: 1;
-  padding: 5px 10px;
-  position: absolute;
-  top: 6px;
-  transform: translateX(-50%);
-  z-index: 2;
+.codex-chat-pager {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  min-height: 24px;
+  pointer-events: auto;
 }
 
 .codex-chat-more,
-.codex-chat-latest {
+.codex-chat-pager-button {
+  background: rgba(255, 252, 244, 0.92);
+  border: 1px solid rgba(45, 38, 31, 0.08);
+  border-radius: 999px;
+  color: #6e6457;
   cursor: pointer;
   font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.codex-chat-more {
+  padding: 5px 10px;
+}
+
+.codex-chat-pager-button {
+  height: 22px;
+  padding: 0;
+  width: 22px;
 }
 
 .codex-chat-more:hover,
-.codex-chat-latest:hover {
+.codex-chat-pager-button:hover:not(:disabled) {
   color: #2d261f;
+}
+
+.codex-chat-pager-button:disabled {
+  cursor: default;
+  opacity: 0.35;
 }
 
 .prefs {
@@ -923,6 +961,356 @@ textarea {
   color: var(--ink-faint);
   font-size: 11px;
   font-weight: 600;
+}
+
+.monthly-journal {
+  align-items: stretch;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 156px;
+  margin: 0 0 28px;
+}
+
+.journal-note {
+  aspect-ratio: 1.42;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  box-shadow: none;
+  min-height: 250px;
+  overflow: hidden;
+  padding: 28px 28px 34px;
+  position: relative;
+}
+
+.journal-note::after {
+  content: none;
+}
+
+.journal-paper {
+  height: 100%;
+  inset: 0;
+  object-fit: fill;
+  pointer-events: none;
+  position: absolute;
+  user-select: none;
+  width: 100%;
+  z-index: 0;
+}
+
+.journal-decor {
+  height: 100%;
+  inset: 0;
+  object-fit: fill;
+  pointer-events: none;
+  position: absolute;
+  user-select: none;
+  width: 100%;
+  z-index: 1;
+}
+
+.journal-tape {
+  border-radius: 2px;
+  box-shadow: 0 1px 3px rgba(87, 64, 31, 0.08);
+  display: block;
+  height: 18px;
+  left: 8px;
+  opacity: 0.72;
+  position: absolute;
+  top: 16px;
+  transform-origin: center;
+  width: 66px;
+  z-index: 2;
+}
+
+.journal-tape--beige {
+  background: rgba(236, 213, 157, 0.72);
+  transform: rotate(-25deg);
+}
+
+.journal-tape--sage {
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.52) 0 1.4px, transparent 1.8px),
+    rgba(155, 169, 126, 0.64);
+  background-size: 9px 9px;
+  left: 25px;
+  top: 18px;
+  transform: rotate(-9deg);
+  width: 60px;
+}
+
+.journal-month {
+  color: #6a4b31;
+  font-family: "Marker Felt", "Chalkboard SE", var(--font-bubble-popover);
+  font-size: 24px;
+  line-height: 1;
+  margin: 4px 0 18px;
+  position: relative;
+  z-index: 2;
+}
+
+.journal-weekdays,
+.journal-week,
+.journal-week-item {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.journal-weekdays {
+  color: #5a4a3a;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  position: relative;
+  text-align: center;
+  z-index: 2;
+}
+
+.journal-calendar {
+  display: grid;
+  gap: 1px;
+  position: relative;
+  z-index: 2;
+}
+
+.journal-week {
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  height: 23px;
+  padding: 0;
+}
+
+.journal-week.is-active,
+.journal-week:hover,
+.journal-week:focus-visible {
+  background: rgba(236, 196, 104, 0.2);
+  outline: 0;
+}
+
+.journal-day {
+  align-items: center;
+  color: #3f342a;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  height: 21px;
+  justify-content: center;
+  justify-self: center;
+  line-height: 1;
+  margin-top: 1px;
+  position: relative;
+  width: 21px;
+}
+
+.journal-day::before {
+  border-radius: 999px;
+  content: "";
+  height: 19px;
+  opacity: 0;
+  position: absolute;
+  transform: rotate(-8deg);
+  width: 19px;
+  z-index: -1;
+}
+
+.journal-day.is-green::before {
+  background: rgba(145, 171, 96, 0.36);
+  opacity: 1;
+}
+
+.journal-day.is-yellow::before {
+  background: rgba(232, 190, 88, 0.38);
+  opacity: 1;
+}
+
+.journal-day.is-red::before {
+  background: rgba(220, 133, 108, 0.32);
+  opacity: 1;
+}
+
+.journal-day.is-outside {
+  color: transparent;
+}
+
+.journal-flower {
+  height: 58px;
+  opacity: 0.74;
+  position: absolute;
+  right: 23px;
+  stroke: #9d783c;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.2;
+  top: 32px;
+  width: 42px;
+  z-index: 1;
+}
+
+.journal-flower circle {
+  fill: rgba(214, 163, 75, 0.5);
+  stroke: none;
+}
+
+.journal-flower path {
+  fill: none;
+}
+
+.journal-paw-trail {
+  bottom: 17px;
+  display: flex;
+  gap: 8px;
+  left: 28px;
+  opacity: 0.42;
+  position: absolute;
+  transform: rotate(-4deg);
+  z-index: 1;
+}
+
+.journal-paw-trail span {
+  height: 11px;
+  position: relative;
+  width: 12px;
+}
+
+.journal-paw-trail span::before,
+.journal-paw-trail span::after {
+  background: rgba(130, 88, 33, 0.36);
+  border-radius: 50%;
+  content: "";
+  position: absolute;
+}
+
+.journal-paw-trail span::before {
+  box-shadow:
+    4px -4px 0 rgba(130, 88, 33, 0.32),
+    8px -1px 0 rgba(130, 88, 33, 0.3);
+  height: 4px;
+  left: 1px;
+  top: 3px;
+  width: 4px;
+}
+
+.journal-paw-trail span::after {
+  height: 5px;
+  left: 4px;
+  top: 6px;
+  width: 7px;
+}
+
+.journal-dog {
+  bottom: 11px;
+  height: 42px;
+  position: absolute;
+  right: 20px;
+  stroke: #6b4d32;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  width: 82px;
+  z-index: 1;
+}
+
+.journal-dog path,
+.journal-dog circle {
+  fill: none;
+}
+
+.journal-week-card {
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  box-shadow: none;
+  color: #3d3025;
+  height: 100%;
+  min-height: 250px;
+  overflow: hidden;
+  padding: 14px 16px 16px;
+  position: relative;
+}
+
+.journal-week-paper {
+  height: 100%;
+  inset: 0;
+  object-fit: fill;
+  pointer-events: none;
+  position: absolute;
+  user-select: none;
+  width: 100%;
+  z-index: 0;
+}
+
+.journal-week-card header {
+  align-items: center;
+  display: flex;
+  font-size: 10.5px;
+  font-weight: 700;
+  justify-content: space-between;
+  margin-bottom: 11px;
+  position: relative;
+  z-index: 1;
+}
+
+.journal-card-dog {
+  height: 20px;
+  object-fit: contain;
+  width: 20px;
+}
+
+.journal-week-list {
+  display: grid;
+  gap: 5px;
+  position: relative;
+  z-index: 1;
+}
+
+.journal-week-item {
+  align-items: center;
+  column-gap: 4px;
+  font-size: 9.5px;
+  grid-template-columns: 20px 34px 18px 18px;
+}
+
+.journal-week-item span:first-child {
+  font-weight: 700;
+}
+
+.journal-week-item span:nth-child(2) {
+  color: #6e6457;
+}
+
+.journal-stamp {
+  display: inline-block;
+  height: 16px;
+  justify-self: center;
+  object-fit: contain;
+  width: 16px;
+}
+
+.journal-stamp.is-empty {
+  height: 16px;
+  opacity: 0;
+  width: 16px;
+}
+
+.journal-week-card footer {
+  border-top: 1px solid rgba(87, 64, 31, 0.1);
+  display: grid;
+  gap: 7px 5px;
+  grid-template-columns: 43px repeat(3, 18px);
+  margin-top: 14px;
+  padding-bottom: 2px;
+  padding-top: 9px;
+  position: relative;
+  z-index: 1;
+}
+
+.journal-week-card footer span {
+  align-self: center;
+  font-size: 9px;
+  font-weight: 700;
 }
 
 .text-link {
@@ -1162,6 +1550,28 @@ textarea {
 .pref-select:focus {
   border-color: var(--accent);
   outline: 0;
+}
+
+.pref-text-input {
+  background: #fff;
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 12.5px;
+  height: 28px;
+  max-width: 100%;
+  min-width: 260px;
+  outline: 0;
+  padding: 0 10px;
+  width: 320px;
+}
+
+.pref-text-input:focus {
+  border-color: var(--accent);
+}
+
+.pref-text-input::placeholder {
+  color: rgba(153, 141, 124, 0.78);
 }
 
 .pref-static-value {

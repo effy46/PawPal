@@ -79,6 +79,26 @@ export const I18N = {
       updateAvailable: [
         (version: string) => `发现新版本 ${version}，去看看更新吧`,
         (version: string) => `PawPal 有新版本 ${version} 啦`
+      ],
+      zoomShareRestored: [
+        "共享结束，我回来啦",
+        "屏幕共享停了，我继续陪你"
+      ],
+      zoomSharePermission: [
+        "Zoom 自动隐藏需要辅助功能权限",
+        "允许辅助功能权限后，我才能检测 Zoom 共享"
+      ],
+      zoomMeetingSoon: [
+        (title: string, minutes: number) => `${title} ${minutes} 分钟后开始`,
+        (title: string, minutes: number) => `${minutes} 分钟后开会：${title}`
+      ],
+      zoomMeetingNow: [
+        (title: string) => `${title} 开始了`,
+        (title: string) => `该进 Zoom 了：${title}`
+      ],
+      zoomMeetingIcsError: [
+        "没读到日历链接，请检查 Settings 里的 ICS URL",
+        "Zoom 会议提醒暂时读不到日历"
       ]
     },
     actions: {
@@ -89,7 +109,9 @@ export const I18N = {
       hydrationDone: "我喝水了",
       hydrationSnooze: "稍后提醒",
       focusBack: "回去工作",
-      focusEnd: "结束专注"
+      focusEnd: "结束专注",
+      joinMeeting: "加入会议",
+      dismiss: "知道了"
     },
     menu: {
       showDog: "显示小狗",
@@ -128,6 +150,17 @@ export const I18N = {
       checkingUpdates: "检查中…",
       updateCheckOnLaunch: "启动时检查更新",
       updateCheckOnLaunchHelp: "开启后每次启动会检查 GitHub 最新 Release；关闭时只在你手动检查时联网。",
+      zoomShareAutoHide: "Zoom 共享时自动隐藏",
+      zoomShareAutoHideHelp: "macOS 专用；检测到 Zoom 正在共享或暂停共享屏幕时，会暂时隐藏所有桌宠。需要辅助功能权限。",
+      zoomMeetingReminders: "Zoom 会议提醒",
+      zoomMeetingRemindersHelp: "从 Outlook 的 ICS 日历链接读取 Zoom 会议；PawPal 会提前提醒并提供加入按钮。",
+      zoomMeetingIcsUrl: "Outlook ICS 链接",
+      zoomMeetingIcsUrlHelp:
+        "请打开 Outlook 网页版（不是桌面 App）：设置 → 日历 → 共享日历 → 发布日历，复制 ICS 链接。如果看不到“共享日历/发布日历”，通常是公司管理员关闭了日历发布。请不要公开分享这个链接。",
+      zoomMeetingIcsPlaceholder: "粘贴 https://.../calendar.ics 或 webcal://...",
+      zoomMeetingReminderLead: "提前提醒",
+      agentActivityRetention: "任务泡泡保留时间",
+      agentActivityRetentionHelp: "控制 Codex / Claude / Cursor 任务卡片在活动后保留多久。",
       updateIdle: "还没有检查更新。",
       updateAvailable: (version: string) => `发现新版本 ${version}`,
       updateCurrent: (version: string) => `已是最新版本 ${version}`,
@@ -138,6 +171,14 @@ export const I18N = {
       testTools: "测试工具",
       language: "语言",
       petAppearance: "宠物形象",
+      agentActivity: "Agent 状态",
+      agentSource: "跟踪对象",
+      agentSourceHelp: "选择这只宠物要跟踪 Codex、Claude Code、Cursor，或只当普通桌宠。",
+      dualAgentMode: "双桌宠 Agent 模式",
+      dualAgentModeHelp: "开启后会显示第二只桌宠；主要宠物继续负责休息、喝水和专注提醒。",
+      secondaryPet: "第二只宠物",
+      secondaryAgentSource: "第二只宠物跟踪",
+      agentSourceNone: "不跟踪",
       customPet: "自定义",
       customPetAssets: "自定义素材",
       customPetRequirements: "仅支持 GIF；默认状态素材必填，其它状态可选；建议使用透明背景并保持主体大小一致",
@@ -190,6 +231,9 @@ export const I18N = {
       breakRunDuration: "休息时长",
       enableHydrationReminder: "开启喝水提醒",
       hydrationInterval: "喝水间隔",
+      dailyWaterGoal: "每日喝水目标",
+      monthlyJournal: "月度手帐",
+      weekCheckIn: "本周打卡",
       focus: "专注",
       focusDuration: "专注时长",
       enableDistractionDetection: "开启分心检测",
@@ -233,6 +277,7 @@ export const I18N = {
       demoHappy: "开心",
       codex: "Codex",
       claudeCode: "Claude Code",
+      cursor: "Cursor",
       codexActivity: "助手状态",
       codexIdle: "空闲",
       codexWorking: "思考中",
@@ -244,6 +289,7 @@ export const I18N = {
       codexBlocked: "受阻",
       codexChats: (count: number) => `${count} 个 Codex 聊天`,
       claudeCodeChats: (count: number) => `${count} 个 Claude Code 聊天`,
+      cursorChats: (count: number) => `${count} 个 Cursor 聊天`,
       codexNeedInputCount: (count: number) => `${count} 个需要输入`,
       codexBlockedCount: (count: number) => `${count} 个受阻`,
       codexActiveCount: (count: number) => `${count} 个活跃中`,
@@ -385,6 +431,26 @@ export const I18N = {
       updateAvailable: [
         (version: string) => `Version ${version} is available. Want to see what's new?`,
         (version: string) => `PawPal has a new version: ${version}.`
+      ],
+      zoomShareRestored: [
+        "Share ended, I'm back.",
+        "Screen sharing stopped. Back with you."
+      ],
+      zoomSharePermission: [
+        "Zoom auto-hide needs Accessibility permission.",
+        "Allow Accessibility so I can detect Zoom sharing."
+      ],
+      zoomMeetingSoon: [
+        (title: string, minutes: number) => `${title} starts in ${minutes} min`,
+        (title: string, minutes: number) => `Zoom soon: ${title} in ${minutes} min`
+      ],
+      zoomMeetingNow: [
+        (title: string) => `${title} is starting now`,
+        (title: string) => `Time to join: ${title}`
+      ],
+      zoomMeetingIcsError: [
+        "I could not read the calendar link. Check the ICS URL in Settings.",
+        "Zoom meeting reminders cannot read your calendar yet."
       ]
     },
     actions: {
@@ -395,7 +461,9 @@ export const I18N = {
       hydrationDone: "I drank water",
       hydrationSnooze: "Remind later",
       focusBack: "Back to work",
-      focusEnd: "End Focus"
+      focusEnd: "End Focus",
+      joinMeeting: "Join",
+      dismiss: "Dismiss"
     },
     menu: {
       showDog: "Show Dog",
@@ -436,6 +504,19 @@ export const I18N = {
       updateCheckOnLaunch: "Check Updates on Launch",
       updateCheckOnLaunchHelp:
         "When enabled, PawPal checks the latest GitHub Release on startup. Otherwise it only checks when you ask.",
+      zoomShareAutoHide: "Auto-Hide During Zoom Share",
+      zoomShareAutoHideHelp:
+        "macOS only; hides all pet windows while Zoom is sharing or paused. Requires Accessibility permission.",
+      zoomMeetingReminders: "Zoom Meeting Reminders",
+      zoomMeetingRemindersHelp:
+        "Reads Zoom meetings from an Outlook ICS calendar link. PawPal reminds you before start time and shows a Join button.",
+      zoomMeetingIcsUrl: "Outlook ICS URL",
+      zoomMeetingIcsUrlHelp:
+        "Use Outlook on the web, not the desktop app: Settings → Calendar → Shared calendars → Publish a calendar. If Shared calendars / Publish calendar is missing, your org likely disabled calendar publishing. Keep the link private.",
+      zoomMeetingIcsPlaceholder: "Paste https://.../calendar.ics or webcal://...",
+      zoomMeetingReminderLead: "Remind Before",
+      agentActivityRetention: "Task Bubble Retention",
+      agentActivityRetentionHelp: "How long Codex / Claude / Cursor task cards stay visible after activity.",
       updateIdle: "Updates have not been checked yet.",
       updateAvailable: (version: string) => `Version ${version} is available.`,
       updateCurrent: (version: string) => `You are on the latest version ${version}.`,
@@ -446,6 +527,14 @@ export const I18N = {
       testTools: "Test Tools",
       language: "Language",
       petAppearance: "Pet",
+      agentActivity: "Agent Activity",
+      agentSource: "Agent Source",
+      agentSourceHelp: "Choose whether this pet watches Codex, Claude Code, Cursor, or no agent.",
+      dualAgentMode: "Dual Agent Mode",
+      dualAgentModeHelp: "Shows a second desktop pet; the primary pet keeps break, water, and focus reminders.",
+      secondaryPet: "Second Pet",
+      secondaryAgentSource: "Second Pet Agent Source",
+      agentSourceNone: "None",
       customPet: "Custom",
       customPetAssets: "Custom Assets",
       customPetRequirements:
@@ -499,6 +588,9 @@ export const I18N = {
       breakRunDuration: "Break Duration",
       enableHydrationReminder: "Enable Hydration Reminder",
       hydrationInterval: "Hydration Interval",
+      dailyWaterGoal: "Daily Water Goal",
+      monthlyJournal: "Monthly Journal",
+      weekCheckIn: "Weekly Check-in",
       focus: "Focus",
       focusDuration: "Focus Duration",
       enableDistractionDetection: "Enable Distraction Detection",
@@ -542,6 +634,7 @@ export const I18N = {
       demoHappy: "Happy",
       codex: "Codex",
       claudeCode: "Claude Code",
+      cursor: "Cursor",
       codexActivity: "Agent Activity",
       codexIdle: "Idle",
       codexWorking: "Thinking",
@@ -553,6 +646,7 @@ export const I18N = {
       codexBlocked: "Blocked",
       codexChats: (count: number) => `${count} Codex chats`,
       claudeCodeChats: (count: number) => `${count} Claude Code chats`,
+      cursorChats: (count: number) => `${count} Cursor chats`,
       codexNeedInputCount: (count: number) => `${count} Need Input`,
       codexBlockedCount: (count: number) => `${count} Blocked`,
       codexActiveCount: (count: number) => `${count} Active`,

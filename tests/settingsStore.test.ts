@@ -27,16 +27,62 @@ export const tests = [
       const settings = normalizeSettings({
         language: "en",
         petAppearanceId: "lovartPuppy",
+        primaryAgentSource: "cursor",
         launchAtLoginEnabled: true,
         checkUpdatesOnLaunchEnabled: true,
+        agentActivityRetentionMinutes: 12,
         breakRunDurationSeconds: 90
       });
 
       assert.equal(settings.language, "en");
       assert.equal(settings.petAppearanceId, "lovartPuppy");
+      assert.equal(settings.primaryAgentSource, "cursor");
       assert.equal(settings.launchAtLoginEnabled, true);
       assert.equal(settings.checkUpdatesOnLaunchEnabled, true);
+      assert.equal(settings.agentActivityRetentionMinutes, 12);
       assert.equal(settings.breakRunDurationSeconds, 90);
+    }
+  },
+  {
+    name: "normalizeSettings clamps daily water goal",
+    run(): void {
+      assert.equal(normalizeSettings({ dailyWaterGoal: 0 }).dailyWaterGoal, 1);
+      assert.equal(normalizeSettings({ dailyWaterGoal: 99 }).dailyWaterGoal, 12);
+      assert.equal(
+        normalizeSettings({ dailyWaterGoal: Number.NaN }).dailyWaterGoal,
+        DEFAULT_SETTINGS.dailyWaterGoal
+      );
+    }
+  },
+  {
+    name: "normalizeSettings clamps agent activity retention",
+    run(): void {
+      assert.equal(normalizeSettings({ agentActivityRetentionMinutes: 0 }).agentActivityRetentionMinutes, 1);
+      assert.equal(normalizeSettings({ agentActivityRetentionMinutes: 120 }).agentActivityRetentionMinutes, 60);
+      assert.equal(
+        normalizeSettings({ agentActivityRetentionMinutes: Number.NaN }).agentActivityRetentionMinutes,
+        DEFAULT_SETTINGS.agentActivityRetentionMinutes
+      );
+    }
+  },
+  {
+    name: "normalizeSettings defaults agent source from pet appearance",
+    run(): void {
+      assert.equal(normalizeSettings({ petAppearanceId: "xiaoJiMao" }).primaryAgentSource, "claude");
+      assert.equal(normalizeSettings({ petAppearanceId: "lovartPuppy" }).primaryAgentSource, "none");
+    }
+  },
+  {
+    name: "normalizeSettings keeps dual agent sources distinct",
+    run(): void {
+      const settings = normalizeSettings({
+        dualAgentModeEnabled: true,
+        primaryAgentSource: "cursor",
+        secondaryAgentSource: "cursor"
+      });
+
+      assert.equal(settings.primaryAgentSource, "cursor");
+      assert.equal(settings.secondaryAgentSource, "codex");
     }
   },
   {
@@ -69,6 +115,26 @@ export const tests = [
 
       assert.equal(settings.petAppearanceId, "custom");
       assert.equal(settings.customPetAppearance?.assets.idle?.relativePath, "custom_pet_assets/idle/my-pet.gif");
+    }
+  },
+  {
+    name: "normalizeSettings migrates known Hachi custom pet to built-in Hachi",
+    run(): void {
+      const settings = normalizeSettings({
+        secondaryPetAppearanceId: "custom",
+        customPetAppearance: {
+          name: "Custom",
+          assets: {
+            idle: {
+              relativePath: "custom_pet_assets/idle/idle-1778998869922-pinterest-25df3773b3f599886bf60b940d2d4c43.gif",
+              originalName: "pinterest-25df3773b3f599886bf60b940d2d4c43.gif",
+              updatedAt: 1
+            }
+          }
+        }
+      });
+
+      assert.equal(settings.secondaryPetAppearanceId, "hachi");
     }
   },
   {

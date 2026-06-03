@@ -1,13 +1,15 @@
 export type Language = "zh-CN" | "en";
 
-export type BuiltInPetAppearanceId = "lovartPuppy" | "lineDog" | "xiaoJiMao";
+export type BuiltInPetAppearanceId = "lovartPuppy" | "lineDog" | "xiaoJiMao" | "hachi";
 
 export type PetAppearanceId = BuiltInPetAppearanceId | "custom";
 
 export type PetFacing = "left" | "right";
 
 export type CodexActivityState = "idle" | "working" | "reviewing" | "complete" | "waiting" | "error";
-export type AgentActivityProvider = "codex" | "claude";
+export type AgentActivityProvider = "codex" | "claude" | "cursor";
+export type AgentActivitySource = AgentActivityProvider | "none";
+export type PetSlotId = "primary" | "secondary";
 
 export type CodexActivitySession = {
   id: string;
@@ -24,7 +26,7 @@ export type CodexActivity = {
   updatedAt: number | null;
   path: string;
   provider: AgentActivityProvider;
-  source: "manual" | "codex-session" | "claude-session";
+  source: "manual" | "codex-session" | "claude-session" | "cursor-session";
   sessions: CodexActivitySession[];
 };
 
@@ -75,14 +77,24 @@ export type Settings = {
   language: Language;
   petAppearanceId: PetAppearanceId;
   customPetAppearance: CustomPetAppearance | null;
+  primaryAgentSource: AgentActivitySource;
+  dualAgentModeEnabled: boolean;
+  secondaryPetAppearanceId: PetAppearanceId;
+  secondaryAgentSource: AgentActivitySource;
   onboardingDismissed: boolean;
   launchAtLoginEnabled: boolean;
   checkUpdatesOnLaunchEnabled: boolean;
+  zoomShareAutoHideEnabled: boolean;
+  zoomMeetingReminderEnabled: boolean;
+  zoomMeetingIcsUrl: string;
+  zoomMeetingReminderLeadMinutes: number;
+  agentActivityRetentionMinutes: number;
   breakReminderEnabled: boolean;
   breakIntervalMinutes: number;
   breakRunDurationSeconds: number;
   hydrationReminderEnabled: boolean;
   hydrationIntervalMinutes: number;
+  dailyWaterGoal: number;
   focusDurationMinutes: number;
   distractionDetectionEnabled: boolean;
   distractionGraceSeconds: number;
@@ -93,6 +105,7 @@ export type Settings = {
 export type TodayStats = {
   date: string;
   breaksTaken: number;
+  breakPromptsShown: number;
   watersLogged: number;
   focusMinutes: number;
   focusWarnings: number;
@@ -127,6 +140,7 @@ export type AppSnapshot = {
   petState: PetState;
   petFacing: PetFacing;
   petScale: number;
+  petSlotId: PetSlotId;
   codexActivity: CodexActivity;
   blockingMode: BlockingMode;
   focusActive: boolean;

@@ -10,6 +10,8 @@ export type PetAsset = {
   src: string;
   isPlaceholder: boolean;
   replayIntervalMs?: number;
+  displayScale?: number;
+  displayYOffset?: number;
 };
 
 function normalizeAssetPaths(path: string | string[]): string[] {
@@ -53,6 +55,8 @@ export function getPetAsset(
   return {
     src: src.href,
     isPlaceholder: Boolean(asset.isPlaceholder),
-    replayIntervalMs: asset.replayIntervalMs
+    replayIntervalMs: asset.replayIntervalMs,
+    displayScale: asset.displayScale,
+    displayYOffset: asset.displayYOffset
   };
 }

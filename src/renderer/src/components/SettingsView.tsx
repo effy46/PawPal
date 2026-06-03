@@ -10,18 +10,33 @@ import {
   resolvePetAppearanceId
 } from "../../../shared/petAppearances";
 import type {
+  AgentActivitySource,
   BuiltInPetAppearanceId,
   CodexActivityState,
   CustomPetAppearance,
   CustomPetAsset,
   DemoTrigger,
+  Language,
+  PetAppearanceId,
   PetState,
   Settings,
+  StatsHistory,
+  TodayStats,
   UpdateCheckResult
 } from "../../../shared/types";
 import { getPetAsset } from "../assets";
 import { distractionHelp, formatDistractionState, formatTimer, formatTimestamp, localeFor } from "../format";
 import { useNow, useSnapshot } from "../hooks";
+import monthlyJournalPaper from "../media/monthly-journal-paper.png";
+import monthlyJournalOverlay from "../media/monthly-journal-overlay.png";
+import monthlyJournalWeekCard from "../media/monthly-journal-week-card.png";
+import weeklyCardDog from "../media/weekly-card-dog.png";
+import dogGreenStamp from "../media/stamps/dog-green.png";
+import dogRedStamp from "../media/stamps/dog-red.png";
+import dogYellowStamp from "../media/stamps/dog-yellow.png";
+import waterGreenStamp from "../media/stamps/water-green.png";
+import waterRedStamp from "../media/stamps/water-red.png";
+import waterYellowStamp from "../media/stamps/water-yellow.png";
 
 type SettingsCopy = ReturnType<typeof i18n>["settings"];
 const CUSTOM_PET_STATE_ORDER = PET_STATE_ORDER.filter((state) => state !== "quitRunning");
@@ -82,6 +97,34 @@ function NumberControl({
   unit: string;
   onChange: (next: number) => void;
 }): JSX.Element {
+  const [draft, setDraft] = useState(String(value));
+
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  function normalize(raw: number): number {
+    return Math.min(max, Math.max(min, Math.round(raw)));
+  }
+
+  function commitDraft(raw: string): void {
+    const next = Number(raw);
+    if (!Number.isFinite(next)) {
+      setDraft(String(value));
+      return;
+    }
+
+    const normalized = normalize(next);
+    setDraft(String(normalized));
+    onChange(normalized);
+  }
+
+  function step(next: number): void {
+    const normalized = normalize(next);
+    setDraft(String(normalized));
+    onChange(normalized);
+  }
+
   return (
     <div className="pref-stepper">
       <button
@@ -89,7 +132,7 @@ function NumberControl({
         className="pref-stepper__btn"
         aria-label="−"
         disabled={value <= min}
-        onClick={() => onChange(Math.max(min, value - 1))}
+        onClick={() => step(value - 1)}
       >
         −
       </button>
@@ -97,10 +140,19 @@ function NumberControl({
         type="number"
         min={min}
         max={max}
-        value={value}
+        value={draft}
         onChange={(event) => {
-          const next = Number(event.target.value);
-          if (Number.isFinite(next)) onChange(Math.min(max, Math.max(min, next)));
+          const nextDraft = event.target.value;
+          setDraft(nextDraft);
+
+          const next = Number(nextDraft);
+          if (Number.isFinite(next) && next >= min && next <= max) {
+            onChange(Math.round(next));
+          }
+        }}
+        onBlur={() => commitDraft(draft)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
         }}
       />
       <span className="pref-stepper__unit">{unit}</span>
@@ -109,11 +161,32 @@ function NumberControl({
         className="pref-stepper__btn"
         aria-label="+"
         disabled={value >= max}
-        onClick={() => onChange(Math.min(max, value + 1))}
+        onClick={() => step(value + 1)}
       >
         +
       </button>
     </div>
+  );
+}
+
+function TextControl({
+  value,
+  placeholder,
+  onChange
+}: {
+  value: string;
+  placeholder: string;
+  onChange: (next: string) => void;
+}): JSX.Element {
+  return (
+    <input
+      className="pref-text-input"
+      type="url"
+      value={value}
+      placeholder={placeholder}
+      spellCheck={false}
+      onChange={(event) => onChange(event.target.value)}
+    />
   );
 }
 
@@ -147,6 +220,262 @@ function formatCodexActivityState(state: CodexActivityState, labels: SettingsCop
     error: labels.codexError
   };
   return labelMap[state];
+}
+
+function agentSourceOptions(labels: SettingsCopy): Array<{ value: AgentActivitySource; label: string }> {
+  return [
+    { value: "codex", label: labels.codex },
+    { value: "claude", label: labels.claudeCode },
+    { value: "cursor", label: labels.cursor },
+    { value: "none", label: labels.agentSourceNone }
+  ];
+}
+
+type JournalTone = "red" | "yellow" | "green";
+type BreakTone = JournalTone | "empty";
+type JournalDay = {
+  key: string;
+  day: number;
+  inMonth: boolean;
+  stats?: TodayStats;
+  tone?: JournalTone;
+};
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const WATER_STAMPS: Record<JournalTone, string> = {
+  green: waterGreenStamp,
+  yellow: waterYellowStamp,
+  red: waterRedStamp
+};
+const DOG_STAMPS: Record<JournalTone, string> = {
+  green: dogGreenStamp,
+  yellow: dogYellowStamp,
+  red: dogRedStamp
+};
+
+function parseDateKey(key: string): Date {
+  const [year, month, day] = key.split("-").map(Number);
+  return new Date(year || new Date().getFullYear(), (month || 1) - 1, day || 1);
+}
+
+function formatDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function dateWithOffset(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(date.getDate() + days);
+  return next;
+}
+
+function monthLabel(date: Date, language: Language): string {
+  return new Intl.DateTimeFormat(localeFor(language), { month: "long" }).format(date);
+}
+
+function weekdayLabel(date: Date, language: Language): string {
+  return new Intl.DateTimeFormat(localeFor(language), { weekday: "short" }).format(date);
+}
+
+function weekRangeLabel(days: JournalDay[], language: Language): string {
+  const monthFormatter = new Intl.DateTimeFormat(localeFor(language), { month: "short" });
+  const start = parseDateKey(days[0]?.key ?? formatDateKey(new Date()));
+  const end = parseDateKey(days[days.length - 1]?.key ?? formatDateKey(new Date()));
+  const startMonth = monthFormatter.format(start);
+  const endMonth = monthFormatter.format(end);
+  if (startMonth === endMonth) return `${startMonth} ${start.getDate()} - ${end.getDate()}`;
+  return `${startMonth} ${start.getDate()} - ${endMonth} ${end.getDate()}`;
+}
+
+function waterTone(stats: TodayStats | undefined, goal: number): JournalTone | "empty" {
+  if (!stats) return "empty";
+  if (stats.watersLogged >= goal) return "green";
+  if (stats.watersLogged > 0) return "yellow";
+  return "red";
+}
+
+function breakTone(stats: TodayStats | undefined): BreakTone {
+  if (!stats) return "empty";
+  if (stats.breakPromptsShown <= 0) return stats.breaksTaken > 0 ? "green" : "empty";
+  if (stats.breaksTaken >= stats.breakPromptsShown) return "green";
+  if (stats.breaksTaken > 0) return "yellow";
+  return "red";
+}
+
+function dayTone(stats: TodayStats | undefined, waterGoal: number): JournalTone | undefined {
+  if (!stats) return undefined;
+  const water = waterTone(stats, waterGoal);
+  const breaks = breakTone(stats);
+  if (water === "green" && breaks !== "red") return "green";
+  if (water === "red" && (breaks === "red" || breaks === "empty")) return "red";
+  return "yellow";
+}
+
+function buildJournalWeeks(
+  stats: TodayStats,
+  history: StatsHistory,
+  waterGoal: number
+): JournalDay[][] {
+  const reference = stats.date ? parseDateKey(stats.date) : new Date();
+  const first = new Date(reference.getFullYear(), reference.getMonth(), 1);
+  const last = new Date(reference.getFullYear(), reference.getMonth() + 1, 0);
+  const sundayOffset = first.getDay();
+  const start = dateWithOffset(first, -sundayOffset);
+  const weeks: JournalDay[][] = [];
+
+  for (let week = 0; week < 6; week += 1) {
+    const days = Array.from({ length: 7 }, (_, index) => {
+      const date = dateWithOffset(start, week * 7 + index);
+      const key = formatDateKey(date);
+      const dayStats = key === stats.date ? stats : history[key];
+      return {
+        key,
+        day: date.getDate(),
+        inMonth: date.getMonth() === reference.getMonth(),
+        stats: dayStats,
+        tone: dayTone(dayStats, waterGoal)
+      };
+    });
+    weeks.push(days);
+    if (days.some((day) => day.key === formatDateKey(last)) && dateWithOffset(days[6] ? parseDateKey(days[6].key) : last, 1).getMonth() !== reference.getMonth()) {
+      break;
+    }
+  }
+
+  return weeks;
+}
+
+function WaterBottle({ tone }: { tone: JournalTone | "empty" }): JSX.Element {
+  if (tone === "empty") return <span className="journal-stamp is-empty" aria-hidden="true" />;
+  return <img className="journal-stamp" src={WATER_STAMPS[tone]} alt="" aria-hidden="true" />;
+}
+
+function BreakStamp({ tone }: { tone: BreakTone }): JSX.Element {
+  if (tone === "empty") return <span className="journal-stamp is-empty" aria-hidden="true" />;
+  return <img className="journal-stamp" src={DOG_STAMPS[tone]} alt="" aria-hidden="true" />;
+}
+
+function MonthlyJournal({
+  stats,
+  history,
+  settings,
+  labels,
+  language
+}: {
+  stats: TodayStats;
+  history: StatsHistory;
+  settings: Settings;
+  labels: SettingsCopy;
+  language: Language;
+}): JSX.Element {
+  const weeks = useMemo(
+    () => buildJournalWeeks(stats, history, settings.dailyWaterGoal),
+    [history, settings.dailyWaterGoal, stats]
+  );
+  const todayKey = stats.date || formatDateKey(new Date());
+  const currentWeekIndex = Math.max(
+    0,
+    weeks.findIndex((week) => week.some((day) => day.key === todayKey))
+  );
+  const [hoveredWeek, setHoveredWeek] = useState<number | null>(null);
+  const activeWeek = hoveredWeek ?? currentWeekIndex;
+  const selectedWeek = weeks[activeWeek] ?? weeks[currentWeekIndex] ?? weeks[0] ?? [];
+  const referenceDate = parseDateKey(todayKey);
+  const weekdays = selectedWeek.map((day) => weekdayLabel(parseDateKey(day.key), language).slice(0, 3));
+
+  useEffect(() => {
+    setHoveredWeek(null);
+  }, [currentWeekIndex]);
+
+  return (
+    <section className="monthly-journal" aria-label={labels.monthlyJournal}>
+      <div className="journal-note">
+        <img className="journal-paper" src={monthlyJournalPaper} alt="" aria-hidden="true" />
+        <img className="journal-decor" src={monthlyJournalOverlay} alt="" aria-hidden="true" />
+        <div className="journal-month">{monthLabel(referenceDate, language)}</div>
+        <div className="journal-weekdays" aria-hidden="true">
+          {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
+            <span key={`${day}-${index}`}>{day}</span>
+          ))}
+        </div>
+        <div className="journal-calendar">
+          {weeks.map((week, weekIndex) => (
+            <button
+              type="button"
+              key={week[0]?.key ?? weekIndex}
+              className={`journal-week${weekIndex === activeWeek ? " is-active" : ""}`}
+              onMouseEnter={() => setHoveredWeek(weekIndex)}
+              onMouseLeave={() => setHoveredWeek(null)}
+              onFocus={() => setHoveredWeek(weekIndex)}
+              onBlur={() => setHoveredWeek(null)}
+              aria-label={weekRangeLabel(week, language)}
+            >
+              {week.map((day) => (
+                <span
+                  key={day.key}
+                  className={`journal-day${day.inMonth ? "" : " is-outside"}${day.tone ? ` is-${day.tone}` : ""}`}
+                >
+                  {day.inMonth ? day.day : ""}
+                </span>
+              ))}
+            </button>
+          ))}
+        </div>
+      </div>
+      <aside className="journal-week-card" aria-label={labels.weekCheckIn}>
+        <img className="journal-week-paper" src={monthlyJournalWeekCard} alt="" aria-hidden="true" />
+        <header>
+          <span>{weekRangeLabel(selectedWeek, language)}</span>
+          <img className="journal-card-dog" src={weeklyCardDog} alt="" aria-hidden="true" />
+        </header>
+        <div className="journal-week-list">
+          {selectedWeek.map((day, index) => {
+            const dayStats = day.stats;
+            return (
+              <div className="journal-week-item" key={day.key}>
+                <span>{day.day}</span>
+                <span>{weekdays[index]}</span>
+                <WaterBottle tone={waterTone(dayStats, settings.dailyWaterGoal)} />
+                <BreakStamp tone={breakTone(dayStats)} />
+              </div>
+            );
+          })}
+        </div>
+        <footer>
+          <span>{labels.water}</span>
+          <WaterBottle tone="green" />
+          <WaterBottle tone="yellow" />
+          <WaterBottle tone="red" />
+          <span>{labels.breaks}</span>
+          <BreakStamp tone="green" />
+          <BreakStamp tone="yellow" />
+          <BreakStamp tone="red" />
+        </footer>
+      </aside>
+    </section>
+  );
+}
+
+function agentSourceSelectOptions(
+  labels: SettingsCopy,
+  disabledSource?: AgentActivitySource
+): Array<{ value: string; label: string }> {
+  return agentSourceOptions(labels).filter((option) => option.value === "none" || option.value !== disabledSource);
+}
+
+function petSelectOptions(
+  language: Settings["language"],
+  labels: SettingsCopy,
+  customPetReady: boolean
+): Array<{ value: string; label: string }> {
+  const options: Array<{ value: string; label: string }> = petAppearanceOptions(language).map((option) => ({
+    value: option.value,
+    label: option.label
+  }));
+  if (customPetReady) options.push({ value: "custom", label: labels.customPet });
+  return options;
 }
 
 function ChipsControl({
@@ -333,6 +662,25 @@ export function SettingsView(): JSX.Element {
     setSettingsDirty(true);
   }
 
+  function updateAgentDraft(partial: Partial<Settings>): void {
+    setDraft((current) => {
+      const next = { ...current, ...partial };
+      if (
+        next.dualAgentModeEnabled &&
+        next.primaryAgentSource !== "none" &&
+        next.primaryAgentSource === next.secondaryAgentSource
+      ) {
+        if (partial.primaryAgentSource) {
+          next.secondaryAgentSource = next.primaryAgentSource === "codex" ? "claude" : "codex";
+        } else {
+          next.primaryAgentSource = next.secondaryAgentSource === "codex" ? "claude" : "codex";
+        }
+      }
+      return next;
+    });
+    setSettingsDirty(true);
+  }
+
   async function checkForUpdates(): Promise<void> {
     await window.pawpal.checkForUpdates();
   }
@@ -395,6 +743,14 @@ export function SettingsView(): JSX.Element {
         <StatCard label={labels.focusMin} value={stats.focusMinutes} unit={labels.minuteUnit} />
         <StatCard label={labels.warnings} value={stats.focusWarnings} unit={labels.countUnit} />
       </section>
+
+      <MonthlyJournal
+        stats={stats}
+        history={snapshot.statsHistory}
+        settings={draft}
+        labels={labels}
+        language={language}
+      />
 
       {!draft.onboardingDismissed ? (
         <aside className="prefs__welcome">
@@ -469,6 +825,65 @@ export function SettingsView(): JSX.Element {
       </section>
 
       <section className="prefs__group">
+        <h2 className="prefs__group-title">{labels.agentActivity}</h2>
+        <Row
+          label={labels.agentSource}
+          hint={labels.agentSourceHelp}
+          control={
+            <SelectControl
+              value={draft.primaryAgentSource}
+              options={agentSourceSelectOptions(
+                labels,
+                draft.dualAgentModeEnabled ? draft.secondaryAgentSource : undefined
+              )}
+              onChange={(value) =>
+                updateAgentDraft({ primaryAgentSource: value as AgentActivitySource })
+              }
+            />
+          }
+        />
+        <Row
+          label={labels.dualAgentMode}
+          hint={labels.dualAgentModeHelp}
+          control={
+            <ToggleControl
+              checked={draft.dualAgentModeEnabled}
+              onChange={(dualAgentModeEnabled) => updateAgentDraft({ dualAgentModeEnabled })}
+              ariaLabel={labels.dualAgentMode}
+            />
+          }
+        />
+        {draft.dualAgentModeEnabled ? (
+          <>
+            <Row
+              label={labels.secondaryPet}
+              control={
+                <SelectControl
+                  value={draft.secondaryPetAppearanceId}
+                  options={petSelectOptions(language, labels, customPetReady)}
+                  onChange={(value) =>
+                    updateAgentDraft({ secondaryPetAppearanceId: value as PetAppearanceId })
+                  }
+                />
+              }
+            />
+            <Row
+              label={labels.secondaryAgentSource}
+              control={
+                <SelectControl
+                  value={draft.secondaryAgentSource}
+                  options={agentSourceSelectOptions(labels, draft.primaryAgentSource)}
+                  onChange={(value) =>
+                    updateAgentDraft({ secondaryAgentSource: value as AgentActivitySource })
+                  }
+                />
+              }
+            />
+          </>
+        ) : null}
+      </section>
+
+      <section className="prefs__group">
         <h2 className="prefs__group-title">{labels.reminders}</h2>
         <Row
           label={labels.enableBreakReminder}
@@ -523,6 +938,18 @@ export function SettingsView(): JSX.Element {
               max={900}
               unit={labels.minuteUnit}
               onChange={(hydrationIntervalMinutes) => updateDraft({ hydrationIntervalMinutes })}
+            />
+          }
+        />
+        <Row
+          label={labels.dailyWaterGoal}
+          control={
+            <NumberControl
+              value={draft.dailyWaterGoal}
+              min={1}
+              max={12}
+              unit={labels.countUnit}
+              onChange={(dailyWaterGoal) => updateDraft({ dailyWaterGoal })}
             />
           }
         />
@@ -649,6 +1076,68 @@ export function SettingsView(): JSX.Element {
                 updateDraft({ checkUpdatesOnLaunchEnabled })
               }
               ariaLabel={labels.updateCheckOnLaunch}
+            />
+          }
+        />
+        <Row
+          label={labels.zoomShareAutoHide}
+          hint={labels.zoomShareAutoHideHelp}
+          control={
+            <ToggleControl
+              checked={draft.zoomShareAutoHideEnabled}
+              onChange={(zoomShareAutoHideEnabled) => updateDraft({ zoomShareAutoHideEnabled })}
+              ariaLabel={labels.zoomShareAutoHide}
+            />
+          }
+        />
+        <Row
+          label={labels.zoomMeetingReminders}
+          hint={labels.zoomMeetingRemindersHelp}
+          control={
+            <ToggleControl
+              checked={draft.zoomMeetingReminderEnabled}
+              onChange={(zoomMeetingReminderEnabled) => updateDraft({ zoomMeetingReminderEnabled })}
+              ariaLabel={labels.zoomMeetingReminders}
+            />
+          }
+        />
+        {draft.zoomMeetingReminderEnabled ? (
+          <>
+            <Row
+              label={labels.zoomMeetingIcsUrl}
+              hint={labels.zoomMeetingIcsUrlHelp}
+              control={
+                <TextControl
+                  value={draft.zoomMeetingIcsUrl}
+                  placeholder={labels.zoomMeetingIcsPlaceholder}
+                  onChange={(zoomMeetingIcsUrl) => updateDraft({ zoomMeetingIcsUrl })}
+                />
+              }
+            />
+            <Row
+              label={labels.zoomMeetingReminderLead}
+              control={
+                <NumberControl
+                  value={draft.zoomMeetingReminderLeadMinutes}
+                  min={0}
+                  max={30}
+                  unit={labels.minuteUnit}
+                  onChange={(zoomMeetingReminderLeadMinutes) => updateDraft({ zoomMeetingReminderLeadMinutes })}
+                />
+              }
+            />
+          </>
+        ) : null}
+        <Row
+          label={labels.agentActivityRetention}
+          hint={labels.agentActivityRetentionHelp}
+          control={
+            <NumberControl
+              value={draft.agentActivityRetentionMinutes}
+              min={1}
+              max={60}
+              unit={labels.minuteUnit}
+              onChange={(agentActivityRetentionMinutes) => updateDraft({ agentActivityRetentionMinutes })}
             />
           }
         />

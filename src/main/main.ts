@@ -1,4 +1,6 @@
+import { execFile } from "node:child_process";
 import { basename, extname, join, resolve, sep } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { copyFile, mkdir, open, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
@@ -19,12 +21,14 @@ import {
 import Store from "electron-store";
 import {
   createEmptyStats,
-  DEFAULT_SETTINGS
+  DEFAULT_SETTINGS,
+  todayKey
 } from "../shared/constants";
 import { i18n, pick } from "../shared/i18n";
 import { PET_STATE_ORDER } from "../shared/petAppearances";
 import type {
   AppSnapshot,
+  AgentActivitySource,
   BlockingMode,
   CodexActivity,
   CodexActivitySession,
@@ -34,6 +38,7 @@ import type {
   DistractionStatus,
   DemoTrigger,
   PetFacing,
+  PetSlotId,
   PetState,
   Settings,
   StatsHistory,
@@ -65,6 +70,8 @@ import {
 import type { DisplayBounds, SavedWindowPosition } from "./displayPosition";
 import { classifyDistraction, isPermissionError, readActiveWindow } from "./distraction";
 import { applyLaunchAtLoginPreference, getLaunchAtLoginState } from "./loginItem";
+import { parseIcsZoomMeetings } from "./icsCalendar";
+import type { CalendarMeeting } from "./icsCalendar";
 import {
   buildApplicationMenuTemplate,
   buildPetContextMenuTemplate,
@@ -83,16 +90,26 @@ import {
   createCheckingUpdateCheck,
   createInitialUpdateCheck
 } from "./updates";
+import { readZoomShareStatus } from "./zoomShare";
 
 type StoreSchema = {
   settings: Settings;
   stats: TodayStats;
   statsHistory: StatsHistory;
   petPosition?: SavedWindowPosition;
+  secondaryPetPosition?: SavedWindowPosition;
   petScale?: number;
+  petHiddenByUser?: boolean;
 };
 
 type SettingsCopy = ReturnType<typeof i18n>["settings"];
+const ZOOM_SHARE_CHECK_INTERVAL_MS = 2_500;
+const ZOOM_MEETING_CHECK_INTERVAL_MS = 60_000;
+const ZOOM_MEETING_ICS_CACHE_MS = 5 * 60 * 1000;
+const ZOOM_MEETING_HORIZON_MS = 12 * 60 * 60 * 1000;
+const ZOOM_MEETING_ALERT_WINDOW_MS = 75 * 1000;
+const ZOOM_MEETING_BUBBLE_MS = 10 * 60 * 1000;
+const REMINDER_BUSY_RETRY_MS = 5 * 60 * 1000;
 
 type PetPosition = {
   x: number;
@@ -111,10 +128,12 @@ const store = new Store<StoreSchema>({
 });
 
 let petWindow: BrowserWindow | null = null;
+let secondaryPetWindow: BrowserWindow | null = null;
 let settingsWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let petState: PetState = "idle";
 let petFacing: PetFacing = "right";
+let secondaryPetFacing: PetFacing = "right";
 let blockingMode: BlockingMode = null;
 let focusActive = false;
 let focusStartedAt: number | null = null;
@@ -126,8 +145,14 @@ let hydrationTimer: NodeJS.Timeout | null = null;
 let focusTimer: NodeJS.Timeout | null = null;
 let distractionTimer: NodeJS.Timeout | null = null;
 let distractionStartupTimer: NodeJS.Timeout | null = null;
+let zoomShareTimer: NodeJS.Timeout | null = null;
+let zoomMeetingTimer: NodeJS.Timeout | null = null;
 let displayChangeTimer: NodeJS.Timeout | null = null;
 let codexActivityTimer: NodeJS.Timeout | null = null;
+let codexSessionFilesCache: {
+  loadedAt: number;
+  files: Array<{ path: string; mtimeMs: number }>;
+} | null = null;
 let breakDueAt: number | null = null;
 let hydrationDueAt: number | null = null;
 let focusEndsAt: number | null = null;
@@ -137,15 +162,28 @@ let dragSafetyTimer: NodeJS.Timeout | null = null;
 let resizeTimer: NodeJS.Timeout | null = null;
 let resizeSafetyTimer: NodeJS.Timeout | null = null;
 let quitAnimationTimer: NodeJS.Timeout | null = null;
+let breakMuteResetTimer: NodeJS.Timeout | null = null;
 let breakRunVelocity: PetPosition = { x: 0, y: 0 };
 let breakRunFormatter: ((seconds: number) => string) | null = null;
 let nextBreakRunTurnAt = 0;
 let breakMutedToday = false;
+let breakMutedDate: string | null = null;
 let dragOffset: PetPosition = { x: 0, y: 0 };
+let dragSlot: PetSlotId = "primary";
 let petScale = normalizePetScale(store.get("petScale"));
 let petMouseInteractive = true;
+let secondaryPetMouseInteractive = true;
 let quitAnimationRunning = false;
 let quitAfterAnimation = false;
+let zoomShareAutoHidden = false;
+let zoomShareRestorePrimary = false;
+let zoomShareRestoreSecondary = false;
+let zoomSharePermissionHintShown = false;
+let zoomMeetingIcsCache: { url: string; fetchedAt: number; meetings: CalendarMeeting[] } | null = null;
+let zoomMeetingAlerted = new Set<string>();
+let zoomMeetingJoinActions = new Map<string, string>();
+let zoomMeetingActionCounter = 0;
+let zoomMeetingIcsErrorShown = false;
 let distractionStatus: DistractionStatus = {
   state: "idle",
   activeApp: "",
@@ -158,6 +196,7 @@ let distractionStatus: DistractionStatus = {
 let updateCheck: UpdateCheckResult = createInitialUpdateCheck();
 
 type PetResizeSession = {
+  slot: PetSlotId;
   startCursor: PetPosition;
   startBounds: Electron.Rectangle;
   startScale: number;
@@ -206,33 +245,53 @@ function claudeCodeSessionsRoot(): string {
   return join(app.getPath("appData"), "Claude", "claude-code-sessions");
 }
 
-function codexSessionSearchRoots(): string[] {
-  return Array.from({ length: 7 }, (_unused, offset) => {
-    const date = new Date(Date.now() - offset * 24 * 60 * 60 * 1000);
-    return join(
-      codexSessionsRoot(),
-      String(date.getFullYear()),
-      String(date.getMonth() + 1).padStart(2, "0"),
-      String(date.getDate()).padStart(2, "0")
-    );
-  });
+function cursorAppDataRoot(): string {
+  return join(app.getPath("appData"), "Cursor");
 }
 
-let codexActivity: CodexActivity = {
-  state: "idle",
-  message: null,
-  updatedAt: null,
-  path: codexActivityPath(),
-  provider: "codex",
-  source: "manual",
-  sessions: []
+function cursorLogsRoot(): string {
+  return join(cursorAppDataRoot(), "logs");
+}
+
+function cursorGlobalStatePath(): string {
+  return join(cursorAppDataRoot(), "User", "globalStorage", "state.vscdb");
+}
+
+let agentActivities: Record<AgentActivityProvider, CodexActivity> = {
+  codex: {
+    state: "idle",
+    message: null,
+    updatedAt: null,
+    path: codexActivityPath(),
+    provider: "codex",
+    source: "manual",
+    sessions: []
+  },
+  claude: {
+    state: "idle",
+    message: null,
+    updatedAt: null,
+    path: claudeProjectsRoot(),
+    provider: "claude",
+    source: "manual",
+    sessions: []
+  },
+  cursor: {
+    state: "idle",
+    message: null,
+    updatedAt: null,
+    path: cursorLogsRoot(),
+    provider: "cursor",
+    source: "manual",
+    sessions: []
+  }
 };
 
 const CODEX_SESSION_TAIL_BYTES = 256 * 1024;
-const CODEX_SESSION_ACTIVE_STALE_MS = 10 * 60 * 1000;
-const CODEX_SESSION_ACTIVE_WINDOW_MS = 60 * 1000;
-const CODEX_SESSION_READY_WINDOW_MS = 60 * 1000;
 const CODEX_SESSION_POLL_MS = 1000;
+const CODEX_SESSION_FILE_CACHE_MS = 10 * 1000;
+const CODEX_DESKTOP_BUNDLE_ID = "com.openai.codex";
+const CLAUDE_DESKTOP_BUNDLE_ID = "com.anthropic.claudefordesktop";
 const CODEX_THREAD_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -252,6 +311,8 @@ type CodexSessionEvent = {
     output?: string;
     cwd?: string;
     turn_id?: string;
+    thread_source?: string;
+    source?: unknown;
   };
 };
 
@@ -297,14 +358,21 @@ type ClaudeCodeSessionMetadata = {
   lastActivityAt?: number;
 };
 
-function codexActivityFreshMs(state: CodexActivityState): number {
-  return state === "complete" ? CODEX_SESSION_READY_WINDOW_MS : CODEX_SESSION_ACTIVE_WINDOW_MS;
+function agentActivityFreshMs(): number {
+  return getSettings().agentActivityRetentionMinutes * 60 * 1000;
 }
 
-function setPetMouseInteractive(interactive: boolean): void {
-  if (!petWindow || petWindow.isDestroyed() || petMouseInteractive === interactive) return;
-  petMouseInteractive = interactive;
-  petWindow.setIgnoreMouseEvents(!interactive, { forward: true });
+function codexActivityFreshMs(_state: CodexActivityState): number {
+  return agentActivityFreshMs();
+}
+
+function setPetMouseInteractive(slot: PetSlotId, interactive: boolean): void {
+  const win = petWindowForSlot(slot);
+  const current = slot === "primary" ? petMouseInteractive : secondaryPetMouseInteractive;
+  if (!win || win.isDestroyed() || current === interactive) return;
+  if (slot === "primary") petMouseInteractive = interactive;
+  else secondaryPetMouseInteractive = interactive;
+  win.setIgnoreMouseEvents(!interactive, { forward: true });
 }
 
 function clearRuntimeTimers(): void {
@@ -317,13 +385,16 @@ function clearRuntimeTimers(): void {
     focusTimer,
     distractionTimer,
     distractionStartupTimer,
+    zoomShareTimer,
+    zoomMeetingTimer,
     displayChangeTimer,
     codexActivityTimer,
     bubbleTimer,
     dragTimer,
     dragSafetyTimer,
     resizeTimer,
-    resizeSafetyTimer
+    resizeSafetyTimer,
+    breakMuteResetTimer
   ]) {
     if (timer) clearTimeout(timer);
   }
@@ -335,6 +406,8 @@ function clearRuntimeTimers(): void {
   focusTimer = null;
   distractionTimer = null;
   distractionStartupTimer = null;
+  zoomShareTimer = null;
+  zoomMeetingTimer = null;
   displayChangeTimer = null;
   codexActivityTimer = null;
   bubbleTimer = null;
@@ -342,6 +415,7 @@ function clearRuntimeTimers(): void {
   dragSafetyTimer = null;
   resizeTimer = null;
   resizeSafetyTimer = null;
+  breakMuteResetTimer = null;
 }
 
 function getSettings(): Settings {
@@ -352,23 +426,41 @@ function text(): ReturnType<typeof i18n> {
   return i18n(getSettings().language);
 }
 
-function agentActivityProviderForPet(): AgentActivityProvider | null {
-  const appearanceId = getSettings().petAppearanceId;
-  if (appearanceId === "lineDog") return "codex";
-  if (appearanceId === "xiaoJiMao") return "claude";
-  return null;
-}
-
 function emptyAgentActivity(provider: AgentActivityProvider = "codex"): CodexActivity {
   return {
     state: "idle",
     message: null,
     updatedAt: null,
-    path: provider === "claude" ? claudeProjectsRoot() : codexActivityPath(),
+    path:
+      provider === "claude"
+        ? claudeProjectsRoot()
+        : provider === "cursor"
+          ? cursorLogsRoot()
+          : codexActivityPath(),
     provider,
     source: "manual",
     sessions: []
   };
+}
+
+function isAgentActivityProvider(value: AgentActivitySource): value is AgentActivityProvider {
+  return value === "codex" || value === "claude" || value === "cursor";
+}
+
+function agentSourceForSlot(slot: PetSlotId): AgentActivitySource {
+  const settings = getSettings();
+  if (slot === "secondary") return settings.dualAgentModeEnabled ? settings.secondaryAgentSource : "none";
+  return settings.primaryAgentSource;
+}
+
+function activeAgentProviders(): AgentActivityProvider[] {
+  const settings = getSettings();
+  const sources = new Set<AgentActivityProvider>();
+  if (isAgentActivityProvider(settings.primaryAgentSource)) sources.add(settings.primaryAgentSource);
+  if (settings.dualAgentModeEnabled && isAgentActivityProvider(settings.secondaryAgentSource)) {
+    sources.add(settings.secondaryAgentSource);
+  }
+  return Array.from(sources);
 }
 
 function setSettings(next: Settings): void {
@@ -379,6 +471,9 @@ function setSettings(next: Settings): void {
   settingsWindow?.setTitle(`${APP_NAME} ${text().menu.settings}`);
   scheduleReminderTimers();
   scheduleDistractionDetection();
+  scheduleZoomShareAutoHide();
+  scheduleZoomMeetingReminders();
+  syncPetWindowsForSettings();
   updateTrayMenu();
   void pollCodexActivity();
 }
@@ -398,6 +493,38 @@ function getStats(): TodayStats {
 function updateStats(mutator: (stats: TodayStats) => TodayStats): void {
   const next = updateCurrentStats(store, mutator);
   sendToAll("stats:updated", next);
+}
+
+function msUntilNextLocalDay(): number {
+  const now = new Date();
+  const nextDay = new Date(now);
+  nextDay.setHours(24, 0, 0, 0);
+  return Math.max(1000, nextDay.getTime() - now.getTime());
+}
+
+function clearBreakMuteResetTimer(): void {
+  if (breakMuteResetTimer) clearTimeout(breakMuteResetTimer);
+  breakMuteResetTimer = null;
+}
+
+function resetExpiredBreakMute(): boolean {
+  if (!breakMutedToday) return false;
+  if (breakMutedDate === todayKey()) return false;
+  breakMutedToday = false;
+  breakMutedDate = null;
+  clearBreakMuteResetTimer();
+  return true;
+}
+
+function scheduleBreakMuteReset(): void {
+  clearBreakMuteResetTimer();
+  if (!breakMutedToday) return;
+  breakMuteResetTimer = setTimeout(() => {
+    breakMutedToday = false;
+    breakMutedDate = null;
+    breakMuteResetTimer = null;
+    scheduleReminderTimers();
+  }, msUntilNextLocalDay());
 }
 
 function isCustomPetState(state: unknown): state is PetState {
@@ -427,8 +554,11 @@ async function importCustomPetAsset(state: PetState, sourcePath: string): Promis
 
 function resetTodayStats(): void {
   breakMutedToday = false;
+  breakMutedDate = null;
+  clearBreakMuteResetTimer();
   const reset = resetCurrentStats(store);
   sendToAll("stats:updated", reset);
+  scheduleReminderTimers();
 }
 
 async function selectCustomPetAsset(state: PetState): Promise<CustomPetAsset | null> {
@@ -447,51 +577,102 @@ async function selectCustomPetAsset(state: PetState): Promise<CustomPetAsset | n
   return importCustomPetAsset(state, result.filePaths[0]);
 }
 
-function snapshot(): AppSnapshot {
+function petWindowForSlot(slot: PetSlotId): BrowserWindow | null {
+  return slot === "primary" ? petWindow : secondaryPetWindow;
+}
+
+function petSlotForWebContents(sender: Electron.WebContents): PetSlotId {
+  if (secondaryPetWindow && !secondaryPetWindow.isDestroyed() && sender.id === secondaryPetWindow.webContents.id) {
+    return "secondary";
+  }
+  return "primary";
+}
+
+function petFacingForSlot(slot: PetSlotId): PetFacing {
+  return slot === "primary" ? petFacing : secondaryPetFacing;
+}
+
+function petAppearanceForSlot(slot: PetSlotId): Settings["petAppearanceId"] {
+  const settings = getSettings();
+  return slot === "primary" || !settings.dualAgentModeEnabled
+    ? settings.petAppearanceId
+    : settings.secondaryPetAppearanceId;
+}
+
+function codexActivityForSlot(slot: PetSlotId): CodexActivity {
+  const source = agentSourceForSlot(slot);
+  return isAgentActivityProvider(source) ? agentActivities[source] : emptyAgentActivity("codex");
+}
+
+function snapshot(slot: PetSlotId = "primary"): AppSnapshot {
+  const slotWindow = petWindowForSlot(slot);
+  const isPrimary = slot === "primary";
+  const settings = getSettingsWithSystemState();
   return {
     appInfo: {
       version: app.getVersion(),
       releaseNotesUrl: RELEASES_URL
     },
     updateCheck,
-    settings: getSettingsWithSystemState(),
+    settings: {
+      ...settings,
+      petAppearanceId: petAppearanceForSlot(slot)
+    },
     stats: getStats(),
     statsHistory: getStatsHistory(store),
     timers: {
-      breakDueAt,
-      hydrationDueAt,
-      focusEndsAt
+      breakDueAt: isPrimary ? breakDueAt : null,
+      hydrationDueAt: isPrimary ? hydrationDueAt : null,
+      focusEndsAt: isPrimary ? focusEndsAt : null
     },
     distraction: distractionStatus,
-    petState,
-    petFacing,
+    petState: isPrimary ? petState : "idle",
+    petFacing: petFacingForSlot(slot),
     petScale,
-    codexActivity,
-    blockingMode,
-    dogVisible: Boolean(petWindow?.isVisible()),
-    focusActive
+    petSlotId: slot,
+    codexActivity: codexActivityForSlot(slot),
+    blockingMode: isPrimary ? blockingMode : null,
+    dogVisible: Boolean(slotWindow?.isVisible()),
+    focusActive: isPrimary ? focusActive : false
   };
 }
 
-function sendToPet<T>(channel: string, payload?: T): void {
-  if (!petWindow || petWindow.isDestroyed()) return;
-  petWindow.webContents.send(channel, payload);
+function isPetHiddenByUser(): boolean {
+  return store.get("petHiddenByUser") === true;
+}
+
+function setPetHiddenByUser(hidden: boolean): void {
+  store.set("petHiddenByUser", hidden);
+  updateTrayMenu();
+  publishSnapshot();
+}
+
+function sendToPet<T>(slot: PetSlotId, channel: string, payload?: T): void {
+  const win = petWindowForSlot(slot);
+  if (!win || win.isDestroyed()) return;
+  win.webContents.send(channel, payload);
 }
 
 function sendToAll<T>(channel: string, payload?: T): void {
-  sendToPet(channel, payload);
+  sendToPet("primary", channel, payload);
+  sendToPet("secondary", channel, payload);
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     settingsWindow.webContents.send(channel, payload);
   }
 }
 
 function publishSnapshot(): void {
-  sendToAll("app:snapshot", snapshot());
+  sendToPet("primary", "app:snapshot", snapshot("primary"));
+  sendToPet("secondary", "app:snapshot", snapshot("secondary"));
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.webContents.send("app:snapshot", snapshot("primary"));
+  }
 }
 
 function setPetState(next: PetState): void {
   petState = next;
-  sendToAll("pet:set-state", next);
+  sendToPet("primary", "pet:set-state", next);
+  publishSnapshot();
 }
 
 function isCodexActivityState(value: unknown): value is CodexActivityState {
@@ -512,9 +693,11 @@ function normalizeCodexActivity(value: unknown): CodexActivity {
   }
   const source = value as Partial<CodexActivity>;
   const state = isCodexActivityState(source.state) ? source.state : "idle";
-  const provider = source.provider === "claude" ? "claude" : "codex";
+  const provider = source.provider === "claude" || source.provider === "cursor" ? source.provider : "codex";
   const activitySource =
-    source.source === "codex-session" || source.source === "claude-session" ? source.source : "manual";
+    source.source === "codex-session" || source.source === "claude-session" || source.source === "cursor-session"
+      ? source.source
+      : "manual";
   const sessions = Array.isArray(source.sessions)
     ? source.sessions
         .filter((session): session is CodexActivitySession => {
@@ -541,17 +724,18 @@ function normalizeCodexActivity(value: unknown): CodexActivity {
   };
 }
 
-function setCodexActivity(next: CodexActivity): void {
+function setAgentActivity(provider: AgentActivityProvider, next: CodexActivity): void {
+  const current = agentActivities[provider];
   const changed =
-    codexActivity.state !== next.state ||
-    codexActivity.message !== next.message ||
-    codexActivity.updatedAt !== next.updatedAt ||
-    codexActivity.path !== next.path ||
-    codexActivity.provider !== next.provider ||
-    codexActivity.source !== next.source ||
-    JSON.stringify(codexActivity.sessions) !== JSON.stringify(next.sessions);
+    current.state !== next.state ||
+    current.message !== next.message ||
+    current.updatedAt !== next.updatedAt ||
+    current.path !== next.path ||
+    current.provider !== next.provider ||
+    current.source !== next.source ||
+    JSON.stringify(current.sessions) !== JSON.stringify(next.sessions);
   if (!changed) return;
-  codexActivity = next;
+  agentActivities = { ...agentActivities, [provider]: next };
   publishSnapshot();
 }
 
@@ -581,17 +765,24 @@ async function writeCodexActivityFile(activity: CodexActivity): Promise<void> {
 }
 
 async function writeCodexActivityDemo(state: CodexActivityState, message: string | null): Promise<void> {
+  const source = agentSourceForSlot("primary");
+  const provider = isAgentActivityProvider(source) ? source : "codex";
   const next: CodexActivity = {
     state,
     message,
     updatedAt: Date.now(),
-    path: codexActivityPath(),
-    provider: agentActivityProviderForPet() ?? "codex",
+    path:
+      provider === "claude"
+        ? claudeProjectsRoot()
+        : provider === "cursor"
+          ? cursorLogsRoot()
+          : codexActivityPath(),
+    provider,
     source: "manual",
     sessions: []
   };
-  await writeCodexActivityFile(next);
-  setCodexActivity(next);
+  if (provider === "codex") await writeCodexActivityFile(next);
+  setAgentActivity(provider, next);
 }
 
 async function findLatestCodexSessionFile(directory: string): Promise<{ path: string; mtimeMs: number } | null> {
@@ -638,9 +829,24 @@ async function findCodexSessionFiles(directory: string): Promise<Array<{ path: s
       continue;
     }
     if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
-    const entryStat = await stat(entryPath);
-    files.push({ path: entryPath, mtimeMs: entryStat.mtimeMs });
+    try {
+      const entryStat = await stat(entryPath);
+      files.push({ path: entryPath, mtimeMs: entryStat.mtimeMs });
+    } catch {
+      // Session logs can rotate while Codex is writing.
+    }
   }
+  return files;
+}
+
+async function findCachedCodexSessionFiles(): Promise<Array<{ path: string; mtimeMs: number }>> {
+  const now = Date.now();
+  if (codexSessionFilesCache && now - codexSessionFilesCache.loadedAt <= CODEX_SESSION_FILE_CACHE_MS) {
+    return codexSessionFilesCache.files;
+  }
+
+  const files = await findCodexSessionFiles(codexSessionsRoot());
+  codexSessionFilesCache = { loadedAt: now, files };
   return files;
 }
 
@@ -665,6 +871,32 @@ async function findJsonFiles(directory: string): Promise<Array<{ path: string; m
       files.push({ path: entryPath, mtimeMs: entryStat.mtimeMs });
     } catch {
       // Session metadata can disappear while Claude is updating it.
+    }
+  }
+  return files;
+}
+
+async function findFilesNamed(directory: string, fileName: string): Promise<Array<{ path: string; mtimeMs: number }>> {
+  let entries: Dirent[];
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const files: Array<{ path: string; mtimeMs: number }> = [];
+  for (const entry of entries) {
+    const entryPath = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await findFilesNamed(entryPath, fileName)));
+      continue;
+    }
+    if (!entry.isFile() || entry.name !== fileName) continue;
+    try {
+      const entryStat = await stat(entryPath);
+      files.push({ path: entryPath, mtimeMs: entryStat.mtimeMs });
+    } catch {
+      // Logs can rotate while Cursor is writing.
     }
   }
   return files;
@@ -983,6 +1215,13 @@ function idForCodexSession(events: CodexSessionEvent[], filePath: string): strin
   return meta?.payload?.id ?? basename(filePath, extname(filePath));
 }
 
+function isUserCodexSession(events: CodexSessionEvent[]): boolean {
+  const meta = events.find((event) => event.type === "session_meta")?.payload;
+  if (!meta) return true;
+  if (meta.thread_source === "subagent") return false;
+  return !(meta.source && typeof meta.source === "object" && "subagent" in meta.source);
+}
+
 async function inferCodexSessionFileActivity(file: {
   path: string;
   mtimeMs: number;
@@ -994,6 +1233,7 @@ async function inferCodexSessionFileActivity(file: {
   ]);
   const raw = `${head}\n${tail}`;
   const events = parseCodexSessionEvents(raw);
+  if (!isUserCodexSession(events)) return null;
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
@@ -1023,9 +1263,14 @@ function aggregateSessionActivity(
   sessions: CodexActivitySession[],
   labels: SettingsCopy,
   provider: AgentActivityProvider,
-  source: "codex-session" | "claude-session"
+  source: "codex-session" | "claude-session" | "cursor-session"
 ): CodexActivity {
-  const path = provider === "claude" ? claudeProjectsRoot() : codexActivityPath();
+  const path =
+    provider === "claude"
+      ? claudeProjectsRoot()
+      : provider === "cursor"
+        ? cursorLogsRoot()
+        : codexActivityPath();
   const waiting = sessions.filter((session) => session.state === "waiting");
   const visibleSessions = [...sessions]
     .sort((left, right) => right.updatedAt - left.updatedAt)
@@ -1113,9 +1358,9 @@ function aggregateSessionActivity(
 }
 
 async function inferCodexSessionActivity(): Promise<CodexActivity | null> {
-  const files = (await Promise.all(codexSessionSearchRoots().map(findCodexSessionFiles)))
-    .flat()
-    .filter((file) => Date.now() - file.mtimeMs <= CODEX_SESSION_ACTIVE_WINDOW_MS)
+  const freshMs = agentActivityFreshMs();
+  const files = (await findCachedCodexSessionFiles())
+    .filter((file) => Date.now() - file.mtimeMs <= freshMs)
     .sort((left, right) => right.mtimeMs - left.mtimeMs)
     .slice(0, 50);
   if (!files.length) return null;
@@ -1312,8 +1557,9 @@ async function inferClaudeSessionFileActivity(file: {
 }
 
 async function inferClaudeSessionActivity(): Promise<CodexActivity | null> {
+  const freshMs = agentActivityFreshMs();
   const files = (await findCodexSessionFiles(claudeProjectsRoot()))
-    .filter((file) => Date.now() - file.mtimeMs <= CODEX_SESSION_ACTIVE_STALE_MS)
+    .filter((file) => Date.now() - file.mtimeMs <= freshMs)
     .sort((left, right) => right.mtimeMs - left.mtimeMs)
     .slice(0, 50);
   if (!files.length) return null;
@@ -1329,13 +1575,180 @@ async function inferClaudeSessionActivity(): Promise<CodexActivity | null> {
   return aggregateSessionActivity(titledSessions, text().settings, "claude", "claude-session");
 }
 
-async function pollCodexActivity(): Promise<void> {
-  const provider = agentActivityProviderForPet();
-  if (!provider) {
-    setCodexActivity(emptyAgentActivity("codex"));
-    return;
+type CursorComposerHeader = {
+  composerId?: string;
+  name?: string;
+  subtitle?: string;
+  lastUpdatedAt?: number;
+  conversationCheckpointLastUpdatedAt?: number;
+  createdAt?: number;
+  workspaceIdentifier?: {
+    uri?: {
+      fsPath?: string;
+      path?: string;
+    };
+  };
+};
+
+type CursorComposerHeadersPayload = {
+  allComposers?: CursorComposerHeader[];
+};
+
+function execFileText(command: string, args: string[]): Promise<string> {
+  return new Promise((resolveText, rejectText) => {
+    execFile(command, args, { maxBuffer: 2 * 1024 * 1024 }, (error, stdout) => {
+      if (error) {
+        rejectText(error);
+        return;
+      }
+      resolveText(stdout);
+    });
+  });
+}
+
+function parseCursorComposerHeaders(raw: string): Map<string, CursorComposerHeader> {
+  const parsed = JSON.parse(raw) as CursorComposerHeadersPayload;
+  const headers = new Map<string, CursorComposerHeader>();
+  for (const composer of parsed.allComposers ?? []) {
+    if (typeof composer.composerId === "string") headers.set(composer.composerId, composer);
+  }
+  return headers;
+}
+
+function extractJsonObjectAroundMarker(textValue: string, marker: string): string | null {
+  const markerIndex = textValue.indexOf(marker);
+  if (markerIndex < 0) return null;
+  const start = textValue.lastIndexOf("{", markerIndex);
+  if (start < 0) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaping = false;
+  for (let index = start; index < textValue.length; index += 1) {
+    const char = textValue[index];
+    if (escaping) {
+      escaping = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaping = true;
+      continue;
+    }
+    if (char === "\"") {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return textValue.slice(start, index + 1);
+    }
+  }
+  return null;
+}
+
+async function readCursorComposerHeaders(): Promise<Map<string, CursorComposerHeader>> {
+  const dbPath = cursorGlobalStatePath();
+  try {
+    const sqlitePath = process.platform === "darwin" ? "/usr/bin/sqlite3" : "sqlite3";
+    const raw = await execFileText(sqlitePath, [
+      "-readonly",
+      dbPath,
+      "select value from ItemTable where key='composer.composerHeaders';"
+    ]);
+    if (raw.trim()) return parseCursorComposerHeaders(raw);
+  } catch {
+    // Keep a raw SQLite-file fallback for machines without sqlite3 on PATH.
   }
 
+  try {
+    const raw = await readFile(dbPath, "utf8");
+    const json = extractJsonObjectAroundMarker(raw, "\"allComposers\"");
+    if (!json) return new Map();
+    return parseCursorComposerHeaders(json);
+  } catch {
+    return new Map();
+  }
+}
+
+function parseCursorLogTimestamp(line: string): number | null {
+  const timestamp = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})/)?.[1];
+  if (!timestamp) return null;
+  const parsed = Date.parse(timestamp.replace(" ", "T"));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function cursorComposerTitle(composerId: string, header: CursorComposerHeader | undefined): string {
+  const title = compactCodexText(header?.name ?? null, 48);
+  if (title) return title;
+  const workspacePath = header?.workspaceIdentifier?.uri?.fsPath ?? header?.workspaceIdentifier?.uri?.path;
+  if (workspacePath) return basename(workspacePath);
+  return `Cursor ${composerId.slice(0, 8)}`;
+}
+
+function cursorComposerMessage(
+  state: CodexActivityState,
+  header: CursorComposerHeader | undefined,
+  labels: SettingsCopy
+): string | null {
+  if (state === "working") return labels.codexWorkingMessage;
+  if (state === "complete") return labels.codexWaitingForNextPrompt;
+  return compactCodexText(header?.subtitle ?? null, 72);
+}
+
+async function inferCursorSessionActivity(): Promise<CodexActivity | null> {
+  const freshMs = agentActivityFreshMs();
+  const files = (await findFilesNamed(cursorLogsRoot(), "renderer.log"))
+    .filter((file) => Date.now() - file.mtimeMs <= freshMs)
+    .sort((left, right) => right.mtimeMs - left.mtimeMs)
+    .slice(0, 20);
+  if (!files.length) return null;
+
+  const latestByComposer = new Map<string, { state: CodexActivityState; updatedAt: number; path: string }>();
+  for (const file of files) {
+    const raw = await readFileTail(file.path, CODEX_SESSION_TAIL_BYTES);
+    for (const line of raw.split("\n")) {
+      if (!line.includes("ComposerWakelockManager") || !line.includes("composerId=")) continue;
+      const composerId = line.match(/composerId=([0-9a-f-]{36})/i)?.[1];
+      const updatedAt = parseCursorLogTimestamp(line) ?? file.mtimeMs;
+      if (!composerId || Date.now() - updatedAt > freshMs) continue;
+
+      let state: CodexActivityState | null = null;
+      if (line.includes("Acquired wakelock") || line.includes("Disabled background throttling")) {
+        state = "working";
+      }
+      if (line.includes("Released wakelock") || line.includes("Restored background throttling")) {
+        state = "complete";
+      }
+      if (!state) continue;
+
+      const existing = latestByComposer.get(composerId);
+      if (!existing || updatedAt >= existing.updatedAt) {
+        latestByComposer.set(composerId, { state, updatedAt, path: file.path });
+      }
+    }
+  }
+  if (!latestByComposer.size) return null;
+
+  const labels = text().settings;
+  const headers = await readCursorComposerHeaders();
+  const sessions = Array.from(latestByComposer, ([composerId, latest]) => {
+    const header = headers.get(composerId);
+    return {
+      id: composerId,
+      title: cursorComposerTitle(composerId, header),
+      state: latest.state,
+      message: cursorComposerMessage(latest.state, header, labels),
+      updatedAt: latest.updatedAt,
+      path: latest.path
+    } satisfies CodexActivitySession;
+  });
+
+  return aggregateSessionActivity(sessions, labels, "cursor", "cursor-session");
+}
+
+async function pollAgentActivity(provider: AgentActivityProvider): Promise<void> {
   let stored: CodexActivity | null = null;
   let inferred: CodexActivity | null = null;
   if (provider === "codex") {
@@ -1344,7 +1757,7 @@ async function pollCodexActivity(): Promise<void> {
       inferCodexSessionActivity()
     ]);
   } else {
-    inferred = await inferClaudeSessionActivity();
+    inferred = provider === "claude" ? await inferClaudeSessionActivity() : await inferCursorSessionActivity();
   }
 
   if (
@@ -1365,11 +1778,24 @@ async function pollCodexActivity(): Promise<void> {
     if (next.source === "codex-session") {
       await writeCodexActivityFile(next);
     }
-    setCodexActivity(next);
+    setAgentActivity(provider, next);
     return;
   }
 
-  setCodexActivity(emptyAgentActivity(provider));
+  setAgentActivity(provider, emptyAgentActivity(provider));
+}
+
+async function pollCodexActivity(): Promise<void> {
+  const providers = activeAgentProviders();
+  await Promise.all(
+    (["codex", "claude", "cursor"] as const).map(async (provider) => {
+      if (!providers.includes(provider)) {
+        setAgentActivity(provider, emptyAgentActivity(provider));
+        return;
+      }
+      await pollAgentActivity(provider);
+    })
+  );
 }
 
 function scheduleCodexActivityPolling(): void {
@@ -1386,7 +1812,7 @@ function setPetFacing(next: PetFacing): void {
 
 function showBubble(bubble: SpeechBubble): void {
   if (bubbleTimer) clearTimeout(bubbleTimer);
-  sendToPet("pet:show-bubble", bubble);
+  sendToPet("primary", "pet:show-bubble", bubble);
   if (bubble.autoDismissMs) {
     bubbleTimer = setTimeout(() => hideBubble(), bubble.autoDismissMs);
   }
@@ -1397,7 +1823,7 @@ function hideBubble(): void {
     clearTimeout(bubbleTimer);
     bubbleTimer = null;
   }
-  sendToPet("pet:hide-bubble");
+  sendToPet("primary", "pet:hide-bubble");
 }
 
 function rendererUrl(route: "pet" | "settings"): string {
@@ -1430,8 +1856,22 @@ function primaryDisplay(): DisplayBounds {
   return toDisplayBounds(screen.getPrimaryDisplay());
 }
 
-function initialPetBounds(): Electron.Rectangle {
-  const stored = store.get("petPosition");
+function defaultSecondaryPetBounds(): Electron.Rectangle {
+  const displays = currentDisplays();
+  const primary = primaryDisplay();
+  const display = displays.find((candidate) => candidate.id !== primary.id) ?? primary;
+  const size = petWindowSize();
+  return visibleWindowBounds(currentDisplays(), primary, {
+    width: size.width,
+    height: size.height,
+    x: display.workArea.x + display.workArea.width - size.width - 24,
+    y: display.workArea.y + display.workArea.height - size.height - 24
+  });
+}
+
+function initialPetBounds(slot: PetSlotId = "primary"): Electron.Rectangle {
+  const stored = slot === "primary" ? store.get("petPosition") : store.get("secondaryPetPosition");
+  if (slot === "secondary" && !stored) return defaultSecondaryPetBounds();
   return initialWindowBounds({
     displays: currentDisplays(),
     primaryDisplay: primaryDisplay(),
@@ -1440,20 +1880,27 @@ function initialPetBounds(): Electron.Rectangle {
   });
 }
 
-function persistPetPosition(): void {
-  if (!petWindow || petWindow.isDestroyed()) return;
-  const bounds = petWindow.getBounds();
-  store.set("petPosition", savedPositionFromBounds(currentDisplays(), bounds, primaryDisplay()));
+function persistPetPosition(slot: PetSlotId = "primary"): void {
+  const win = petWindowForSlot(slot);
+  if (!win || win.isDestroyed()) return;
+  const bounds = win.getBounds();
+  store.set(
+    slot === "primary" ? "petPosition" : "secondaryPetPosition",
+    savedPositionFromBounds(currentDisplays(), bounds, primaryDisplay())
+  );
 }
 
 function keepPetWindowInVisibleWorkArea(): void {
-  if (!petWindow || petWindow.isDestroyed()) return;
-  const bounds = petWindow.getBounds();
-  const nextBounds = visibleWindowBounds(currentDisplays(), primaryDisplay(), bounds);
-  if (bounds.x !== nextBounds.x || bounds.y !== nextBounds.y) {
-    petWindow.setBounds(nextBounds);
+  for (const slot of ["primary", "secondary"] as const) {
+    const win = petWindowForSlot(slot);
+    if (!win || win.isDestroyed()) continue;
+    const bounds = win.getBounds();
+    const nextBounds = visibleWindowBounds(currentDisplays(), primaryDisplay(), bounds);
+    if (bounds.x !== nextBounds.x || bounds.y !== nextBounds.y) {
+      win.setBounds(nextBounds);
+    }
+    persistPetPosition(slot);
   }
-  persistPetPosition();
   publishSnapshot();
 }
 
@@ -1478,10 +1925,11 @@ function registerPowerMonitorHandlers(): void {
   powerMonitor.on("resume", restartReminderTimersAfterAway);
 }
 
-function createPetWindow(): void {
-  const bounds = initialPetBounds();
-  petMouseInteractive = true;
-  petWindow = new BrowserWindow({
+function createPetWindow(slot: PetSlotId = "primary"): void {
+  const bounds = initialPetBounds(slot);
+  if (slot === "primary") petMouseInteractive = true;
+  else secondaryPetMouseInteractive = true;
+  const win = new BrowserWindow({
     width: bounds.width,
     height: bounds.height,
     x: bounds.x,
@@ -1504,40 +1952,81 @@ function createPetWindow(): void {
     }
   });
 
-  petWindow.setAlwaysOnTop(true, process.platform === "darwin" ? "floating" : "normal");
+  if (slot === "primary") petWindow = win;
+  else secondaryPetWindow = win;
+
+  win.setAlwaysOnTop(true, process.platform === "darwin" ? "floating" : "normal");
   if (process.platform === "darwin") {
-    petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   }
-  setPetMouseInteractive(false);
-  loadRenderer(petWindow, "pet");
-  petWindow.once("ready-to-show", () => {
-    petWindow?.showInactive();
+  setPetMouseInteractive(slot, false);
+  loadRenderer(win, "pet");
+  win.once("ready-to-show", () => {
+    if (!isPetHiddenByUser()) win.showInactive();
     updateTrayMenu();
     publishSnapshot();
   });
-  petWindow.on("show", () => {
+  win.on("show", () => {
     updateTrayMenu();
     publishSnapshot();
   });
-  petWindow.on("hide", () => {
-    stopPetDrag();
+  win.on("hide", () => {
+    stopPetDrag(slot);
     stopPetResize();
     updateTrayMenu();
     publishSnapshot();
   });
-  petWindow.on("closed", () => {
-    stopPetDrag();
+  win.on("closed", () => {
+    stopPetDrag(slot);
     stopPetResize();
-    petWindow = null;
+    if (slot === "primary") petWindow = null;
+    else secondaryPetWindow = null;
     updateTrayMenu();
     publishSnapshot();
   });
 }
 
-function ensurePetWindowVisible(): void {
+function ensurePetWindowVisible(options: { ignoreUserHidden?: boolean } = {}): boolean {
+  if (isPetHiddenByUser() && !options.ignoreUserHidden) {
+    updateTrayMenu();
+    publishSnapshot();
+    return false;
+  }
   if (!petWindow || petWindow.isDestroyed()) createPetWindow();
   if (petWindow && !petWindow.isVisible()) petWindow.showInactive();
   updateTrayMenu();
+  publishSnapshot();
+  return true;
+}
+
+function showPetWindowsFromMenu(): void {
+  setPetHiddenByUser(false);
+  if (!petWindow || petWindow.isDestroyed()) createPetWindow();
+  if (petWindow && !petWindow.isVisible()) petWindow.showInactive();
+  if (getSettings().dualAgentModeEnabled) {
+    if (!secondaryPetWindow || secondaryPetWindow.isDestroyed()) createPetWindow("secondary");
+    else if (!secondaryPetWindow.isVisible()) secondaryPetWindow.showInactive();
+  }
+  updateTrayMenu();
+  publishSnapshot();
+}
+
+function syncPetWindowsForSettings(): void {
+  const hiddenByUser = isPetHiddenByUser();
+  if (getSettings().dualAgentModeEnabled) {
+    if (!secondaryPetWindow || secondaryPetWindow.isDestroyed()) createPetWindow("secondary");
+    else if (!hiddenByUser && !secondaryPetWindow.isVisible()) secondaryPetWindow.showInactive();
+  } else if (secondaryPetWindow && !secondaryPetWindow.isDestroyed()) {
+    secondaryPetWindow.close();
+  }
+  if (hiddenByUser) {
+    petWindow?.hide();
+    secondaryPetWindow?.hide();
+  }
+  if (zoomShareAutoHidden) {
+    petWindow?.hide();
+    secondaryPetWindow?.hide();
+  }
   publishSnapshot();
 }
 
@@ -1594,16 +2083,26 @@ function createTray(): void {
 function togglePetWindowVisibility(): void {
   if (!petWindow) createPetWindow();
   if (!petWindow) return;
-  if (petWindow.isVisible()) petWindow.hide();
-  else petWindow.showInactive();
+  const shouldShow = !petWindow.isVisible();
+  if (shouldShow) {
+    showPetWindowsFromMenu();
+    return;
+  }
+  setPetHiddenByUser(true);
+  for (const win of [petWindow, secondaryPetWindow]) {
+    if (!win || win.isDestroyed()) continue;
+    win.hide();
+  }
   updateTrayMenu();
-  sendToAll("app:snapshot", snapshot());
+  publishSnapshot();
 }
 
 function hidePetWindowFromMenu(): void {
+  setPetHiddenByUser(true);
   petWindow?.hide();
+  secondaryPetWindow?.hide();
   updateTrayMenu();
-  sendToAll("app:snapshot", snapshot());
+  publishSnapshot();
 }
 
 function finishQuitAfterAnimation(): void {
@@ -1622,6 +2121,7 @@ function runQuitAnimation(): void {
   blockingMode = null;
   focusActive = false;
   settingsWindow?.close();
+  secondaryPetWindow?.hide();
 
   if (!petWindow || petWindow.isDestroyed()) {
     finishQuitAfterAnimation();
@@ -1630,7 +2130,7 @@ function runQuitAnimation(): void {
 
   const win = petWindow;
   if (!win.isVisible()) win.showInactive();
-  setPetMouseInteractive(false);
+  setPetMouseInteractive("primary", false);
   petState = "quitRunning";
   const startBounds = win.getBounds();
   const target = horizontalRunTarget(currentDisplays(), primaryDisplay(), startBounds);
@@ -1662,7 +2162,7 @@ function runQuitAnimation(): void {
 function menuState() {
   return {
     appName: APP_NAME,
-    dogVisible: Boolean(petWindow?.isVisible()),
+    dogVisible: Boolean(petWindow?.isVisible() || secondaryPetWindow?.isVisible()),
     focusActive,
     isPackaged: app.isPackaged
   };
@@ -1697,17 +2197,18 @@ function updateTrayMenu(): void {
   );
 }
 
-function showPetContextMenu(): void {
+function showPetContextMenu(slot: PetSlotId = "primary"): void {
   const labels = text().menu;
   Menu.buildFromTemplate(buildPetContextMenuTemplate(labels, menuState(), menuActions())).popup({
-    window: petWindow ?? undefined
+    window: petWindowForSlot(slot) ?? undefined
   });
 }
 
 function movePetWithCursor(): void {
-  if (!petWindow || petWindow.isDestroyed()) return;
+  const win = petWindowForSlot(dragSlot);
+  if (!win || win.isDestroyed()) return;
   const cursor = screen.getCursorScreenPoint();
-  const currentBounds = petWindow.getBounds();
+  const currentBounds = win.getBounds();
   const bounds = visibleWindowBounds(
     currentDisplays(),
     primaryDisplay(),
@@ -1719,13 +2220,15 @@ function movePetWithCursor(): void {
     },
     petDragOverflow()
   );
-  petWindow.setBounds(bounds);
+  win.setBounds(bounds);
 }
 
-function startPetDrag(offset: { offsetX: number; offsetY: number }): void {
-  if (blockingMode === "breakRun" || !petWindow || petWindow.isDestroyed()) return;
+function startPetDrag(slot: PetSlotId, offset: { offsetX: number; offsetY: number }): void {
+  const win = petWindowForSlot(slot);
+  if ((slot === "primary" && blockingMode === "breakRun") || !win || win.isDestroyed()) return;
   stopPetResize();
-  const bounds = petWindow.getBounds();
+  dragSlot = slot;
+  const bounds = win.getBounds();
   dragOffset = {
     x: Math.min(Math.max(Math.round(offset.offsetX), 0), bounds.width),
     y: Math.min(Math.max(Math.round(offset.offsetY), 0), bounds.height)
@@ -1737,7 +2240,7 @@ function startPetDrag(offset: { offsetX: number; offsetY: number }): void {
   dragSafetyTimer = setTimeout(stopPetDrag, 15_000);
 }
 
-function stopPetDrag(): void {
+function stopPetDrag(slot: PetSlotId = dragSlot): void {
   const wasDragging = Boolean(dragTimer || dragSafetyTimer);
   if (dragTimer) {
     clearInterval(dragTimer);
@@ -1748,13 +2251,15 @@ function stopPetDrag(): void {
     dragSafetyTimer = null;
   }
   if (wasDragging) {
-    persistPetPosition();
-    sendToAll("app:snapshot", snapshot());
+    persistPetPosition(slot);
+    publishSnapshot();
   }
 }
 
 function movePetResizeWithCursor(): void {
-  if (!petResizeSession || !petWindow || petWindow.isDestroyed()) return;
+  if (!petResizeSession) return;
+  const win = petWindowForSlot(petResizeSession.slot);
+  if (!win || win.isDestroyed()) return;
 
   const cursor = screen.getCursorScreenPoint();
   const dx = cursor.x - petResizeSession.startCursor.x;
@@ -1771,16 +2276,18 @@ function movePetResizeWithCursor(): void {
   });
 
   petScale = nextScale;
-  petWindow.setBounds(nextBounds);
+  win.setBounds(nextBounds);
   publishSnapshot();
 }
 
-function startPetResize(): void {
-  if (blockingMode === "breakRun" || !petWindow || petWindow.isDestroyed()) return;
+function startPetResize(slot: PetSlotId): void {
+  const win = petWindowForSlot(slot);
+  if ((slot === "primary" && blockingMode === "breakRun") || !win || win.isDestroyed()) return;
   stopPetDrag();
   petResizeSession = {
+    slot,
     startCursor: screen.getCursorScreenPoint(),
-    startBounds: petWindow.getBounds(),
+    startBounds: win.getBounds(),
     startScale: petScale
   };
   if (resizeTimer) clearInterval(resizeTimer);
@@ -1792,6 +2299,7 @@ function startPetResize(): void {
 
 function stopPetResize(): void {
   const wasResizing = Boolean(petResizeSession || resizeTimer || resizeSafetyTimer);
+  const resizedSlot = petResizeSession?.slot ?? "primary";
   petResizeSession = null;
   if (resizeTimer) {
     clearInterval(resizeTimer);
@@ -1803,7 +2311,7 @@ function stopPetResize(): void {
   }
   if (wasResizing) {
     store.set("petScale", petScale);
-    persistPetPosition();
+    persistPetPosition(resizedSlot);
     publishSnapshot();
   }
 }
@@ -1900,17 +2408,20 @@ function finishBreakRun(): void {
   hideBubble();
   showBubble({ id: "break-run-complete", message: pick(text().bubble.breakRunComplete), autoDismissMs: 2200 });
   setPetState("breakDone");
+  scheduleBreakReminderTimer();
   setTimeout(() => {
     if (!blockingMode && !focusActive) {
+      if (showOverdueReminder()) return;
       hideBubble();
       setPetState("idle");
-      scheduleReminderTimers();
     }
   }, 2300);
   publishSnapshot();
 }
 
 function startBreakRun(): void {
+  stopPetDrag();
+  stopPetResize();
   ensurePetWindowVisible();
   clearBreakRunTimers();
   blockingMode = "breakRun";
@@ -1929,34 +2440,106 @@ function startBreakRun(): void {
   publishSnapshot();
 }
 
-function clearReminderTimers(): void {
+function clearBreakReminderTimer(): void {
   if (breakTimer) clearTimeout(breakTimer);
-  if (hydrationTimer) clearTimeout(hydrationTimer);
   breakTimer = null;
+}
+
+function clearHydrationReminderTimer(): void {
+  if (hydrationTimer) clearTimeout(hydrationTimer);
   hydrationTimer = null;
+}
+
+function clearReminderTimers(): void {
+  clearBreakReminderTimer();
+  clearHydrationReminderTimer();
   breakDueAt = null;
   hydrationDueAt = null;
 }
 
 function scheduleReminderTimers(): void {
   clearReminderTimers();
+  resetExpiredBreakMute();
+  scheduleBreakMuteReset();
+  scheduleBreakReminderTimer();
+  scheduleHydrationReminderTimer();
+}
 
+function scheduleBreakReminderTimer(delayMs?: number): void {
+  clearBreakReminderTimer();
+  resetExpiredBreakMute();
+  scheduleBreakMuteReset();
   const settings = getSettings();
-  if (settings.breakReminderEnabled && !breakMutedToday) {
-    breakDueAt = Date.now() + settings.breakIntervalMinutes * 60 * 1000;
-    breakTimer = setTimeout(
-      () => triggerBreakReminder(false),
-      settings.breakIntervalMinutes * 60 * 1000
-    );
+  if (!settings.breakReminderEnabled || breakMutedToday) {
+    breakDueAt = null;
+    publishSnapshot();
+    return;
   }
-  if (settings.hydrationReminderEnabled) {
-    hydrationDueAt = Date.now() + settings.hydrationIntervalMinutes * 60 * 1000;
-    hydrationTimer = setTimeout(
-      () => triggerHydrationReminder(false),
-      settings.hydrationIntervalMinutes * 60 * 1000
-    );
-  }
+
+  const nextDelayMs = delayMs ?? settings.breakIntervalMinutes * 60 * 1000;
+  breakDueAt = Date.now() + nextDelayMs;
+  breakTimer = setTimeout(() => triggerBreakReminder(false), nextDelayMs);
   publishSnapshot();
+}
+
+function scheduleHydrationReminderTimer(delayMs?: number): void {
+  clearHydrationReminderTimer();
+  const settings = getSettings();
+  if (!settings.hydrationReminderEnabled) {
+    hydrationDueAt = null;
+    publishSnapshot();
+    return;
+  }
+
+  const nextDelayMs = delayMs ?? settings.hydrationIntervalMinutes * 60 * 1000;
+  hydrationDueAt = Date.now() + nextDelayMs;
+  hydrationTimer = setTimeout(() => triggerHydrationReminder(false), nextDelayMs);
+  publishSnapshot();
+}
+
+function scheduleBreakBusyRetry(): void {
+  resetExpiredBreakMute();
+  if (!getSettings().breakReminderEnabled || breakMutedToday) {
+    clearBreakReminderTimer();
+    breakDueAt = null;
+    publishSnapshot();
+    return;
+  }
+  clearBreakReminderTimer();
+  if (breakDueAt === null) breakDueAt = Date.now();
+  breakTimer = setTimeout(() => triggerBreakReminder(false), REMINDER_BUSY_RETRY_MS);
+  publishSnapshot();
+}
+
+function scheduleHydrationBusyRetry(): void {
+  if (!getSettings().hydrationReminderEnabled) {
+    clearHydrationReminderTimer();
+    hydrationDueAt = null;
+    publishSnapshot();
+    return;
+  }
+  clearHydrationReminderTimer();
+  if (hydrationDueAt === null) hydrationDueAt = Date.now();
+  hydrationTimer = setTimeout(() => triggerHydrationReminder(false), REMINDER_BUSY_RETRY_MS);
+  publishSnapshot();
+}
+
+function showOverdueReminder(): boolean {
+  if (blockingMode || focusActive) return false;
+
+  const now = Date.now();
+  const settings = getSettings();
+  resetExpiredBreakMute();
+  if (settings.breakReminderEnabled && !breakMutedToday && breakDueAt !== null && breakDueAt <= now) {
+    triggerBreakReminder(false);
+    return true;
+  }
+  if (settings.hydrationReminderEnabled && hydrationDueAt !== null && hydrationDueAt <= now) {
+    triggerHydrationReminder(false);
+    return true;
+  }
+
+  return false;
 }
 
 function pauseReminderTimersForAway(): void {
@@ -2057,16 +2640,184 @@ function scheduleDistractionDetection(): void {
   }, firstCheckDelay);
 }
 
+function hidePetsForZoomShare(): void {
+  if (zoomShareAutoHidden) return;
+  zoomShareRestorePrimary = Boolean(petWindow && !petWindow.isDestroyed() && petWindow.isVisible());
+  zoomShareRestoreSecondary = Boolean(
+    secondaryPetWindow && !secondaryPetWindow.isDestroyed() && secondaryPetWindow.isVisible()
+  );
+  zoomShareAutoHidden = zoomShareRestorePrimary || zoomShareRestoreSecondary;
+  for (const win of [petWindow, secondaryPetWindow]) {
+    if (!win || win.isDestroyed() || !win.isVisible()) continue;
+    win.hide();
+  }
+  updateTrayMenu();
+  publishSnapshot();
+}
+
+function restorePetsAfterZoomShare(): void {
+  if (!zoomShareAutoHidden) return;
+  if (zoomShareRestorePrimary && petWindow && !petWindow.isDestroyed()) {
+    petWindow.showInactive();
+  }
+  if (
+    zoomShareRestoreSecondary &&
+    getSettings().dualAgentModeEnabled &&
+    secondaryPetWindow &&
+    !secondaryPetWindow.isDestroyed()
+  ) {
+    secondaryPetWindow.showInactive();
+  }
+  zoomShareAutoHidden = false;
+  zoomShareRestorePrimary = false;
+  zoomShareRestoreSecondary = false;
+  showBubble({ id: "zoom-share-restored", message: pick(text().bubble.zoomShareRestored), autoDismissMs: 1800 });
+  updateTrayMenu();
+  publishSnapshot();
+}
+
+async function checkZoomShareAutoHideNow(): Promise<void> {
+  const settings = getSettings();
+  if (!settings.zoomShareAutoHideEnabled || process.platform !== "darwin") return;
+  const status = await readZoomShareStatus();
+  if (status.state === "sharing") {
+    hidePetsForZoomShare();
+    return;
+  }
+  if (status.state === "not-sharing") {
+    restorePetsAfterZoomShare();
+    return;
+  }
+  if (status.state === "permission-needed" && !zoomSharePermissionHintShown) {
+    zoomSharePermissionHintShown = true;
+    showBubble({ id: "zoom-share-permission", message: pick(text().bubble.zoomSharePermission), autoDismissMs: 3200 });
+  }
+}
+
+function scheduleZoomShareAutoHide(): void {
+  if (zoomShareTimer) {
+    clearInterval(zoomShareTimer);
+    zoomShareTimer = null;
+  }
+  const settings = getSettings();
+  if (!settings.zoomShareAutoHideEnabled || process.platform !== "darwin") {
+    restorePetsAfterZoomShare();
+    return;
+  }
+  void checkZoomShareAutoHideNow();
+  zoomShareTimer = setInterval(() => void checkZoomShareAutoHideNow(), ZOOM_SHARE_CHECK_INTERVAL_MS);
+}
+
+function normalizeIcsUrl(url: string): string {
+  const trimmed = url.trim();
+  if (trimmed.toLowerCase().startsWith("webcal://")) return `https://${trimmed.slice("webcal://".length)}`;
+  return trimmed;
+}
+
+function zoomMeetingAlertKey(meeting: CalendarMeeting, phase: "lead" | "start"): string {
+  return `${meeting.uid}:${meeting.startMs}:${phase}`;
+}
+
+async function readZoomMeetingsFromIcs(settings: Settings): Promise<CalendarMeeting[]> {
+  const url = normalizeIcsUrl(settings.zoomMeetingIcsUrl);
+  if (!url) return [];
+  const now = Date.now();
+  if (zoomMeetingIcsCache && zoomMeetingIcsCache.url === url && now - zoomMeetingIcsCache.fetchedAt < ZOOM_MEETING_ICS_CACHE_MS) {
+    return zoomMeetingIcsCache.meetings;
+  }
+  const response = await net.fetch(url);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const raw = await response.text();
+  const meetings = parseIcsZoomMeetings(raw, now, ZOOM_MEETING_HORIZON_MS);
+  zoomMeetingIcsCache = { url, fetchedAt: now, meetings };
+  zoomMeetingIcsErrorShown = false;
+  return meetings;
+}
+
+function registerZoomMeetingJoinAction(joinUrl: string): string {
+  const actionId = `zoom-meeting:join:${zoomMeetingActionCounter++}`;
+  zoomMeetingJoinActions.set(actionId, joinUrl);
+  if (zoomMeetingJoinActions.size > 20) {
+    const oldest = zoomMeetingJoinActions.keys().next().value;
+    if (oldest) zoomMeetingJoinActions.delete(oldest);
+  }
+  return actionId;
+}
+
+function showZoomMeetingReminder(meeting: CalendarMeeting, phase: "lead" | "start", leadMinutes: number): void {
+  const message =
+    phase === "lead"
+      ? pick(text().bubble.zoomMeetingSoon)(meeting.title, leadMinutes)
+      : pick(text().bubble.zoomMeetingNow)(meeting.title);
+  const joinActionId = registerZoomMeetingJoinAction(meeting.joinUrl);
+  showBubble({
+    id: `zoom-meeting-${phase}-${meeting.uid}-${meeting.startMs}`,
+    message,
+    actions: [
+      { id: joinActionId, label: text().actions.joinMeeting, kind: "primary" },
+      { id: "zoom-meeting:dismiss", label: text().actions.dismiss }
+    ],
+    autoDismissMs: ZOOM_MEETING_BUBBLE_MS
+  });
+}
+
+async function checkZoomMeetingRemindersNow(): Promise<void> {
+  const settings = getSettings();
+  if (!settings.zoomMeetingReminderEnabled || !settings.zoomMeetingIcsUrl.trim()) return;
+  try {
+    const meetings = await readZoomMeetingsFromIcs(settings);
+    const now = Date.now();
+    const leadMs = settings.zoomMeetingReminderLeadMinutes * 60 * 1000;
+    for (const meeting of meetings) {
+      const leadKey = zoomMeetingAlertKey(meeting, "lead");
+      const leadTarget = meeting.startMs - leadMs;
+      if (leadMs > 0 && !zoomMeetingAlerted.has(leadKey) && now >= leadTarget && now <= leadTarget + ZOOM_MEETING_ALERT_WINDOW_MS) {
+        zoomMeetingAlerted.add(leadKey);
+        showZoomMeetingReminder(meeting, "lead", settings.zoomMeetingReminderLeadMinutes);
+        return;
+      }
+
+      const startKey = zoomMeetingAlertKey(meeting, "start");
+      if (!zoomMeetingAlerted.has(startKey) && now >= meeting.startMs && now <= meeting.startMs + ZOOM_MEETING_ALERT_WINDOW_MS) {
+        zoomMeetingAlerted.add(startKey);
+        showZoomMeetingReminder(meeting, "start", settings.zoomMeetingReminderLeadMinutes);
+        return;
+      }
+    }
+  } catch {
+    if (!zoomMeetingIcsErrorShown) {
+      zoomMeetingIcsErrorShown = true;
+      showBubble({ id: "zoom-meeting-ics-error", message: pick(text().bubble.zoomMeetingIcsError), autoDismissMs: 4200 });
+    }
+  }
+}
+
+function scheduleZoomMeetingReminders(): void {
+  if (zoomMeetingTimer) {
+    clearInterval(zoomMeetingTimer);
+    zoomMeetingTimer = null;
+  }
+  const settings = getSettings();
+  if (!settings.zoomMeetingReminderEnabled || !settings.zoomMeetingIcsUrl.trim()) {
+    zoomMeetingIcsCache = null;
+    zoomMeetingIcsErrorShown = false;
+    return;
+  }
+  void checkZoomMeetingRemindersNow();
+  zoomMeetingTimer = setInterval(() => void checkZoomMeetingRemindersNow(), ZOOM_MEETING_CHECK_INTERVAL_MS);
+}
+
 function resumeLongTermState(): void {
   blockingMode = null;
   hideBubble();
+  if (showOverdueReminder()) return;
   if (focusActive) {
     setPetState("focusGuard");
-    sendToAll("app:snapshot", snapshot());
+    publishSnapshot();
     return;
   }
   setPetState("idle");
-  sendToAll("app:snapshot", snapshot());
+  publishSnapshot();
 }
 
 function happyFeedback(message: string | null = pick(text().bubble.woof), after?: () => void): void {
@@ -2094,28 +2845,88 @@ function openReleaseNotes(): void {
   });
 }
 
-function openCodexSession(sessionId: string): void {
+function openMacBundle(bundleId: string, url?: string): Promise<void> {
+  const args = url ? ["-b", bundleId, url] : ["-b", bundleId];
+  return new Promise((resolveOpen, rejectOpen) => {
+    execFile("/usr/bin/open", args, (error) => {
+      if (error) rejectOpen(error);
+      else resolveOpen();
+    });
+  });
+}
+
+function openMacAppByName(appName: string): Promise<void> {
+  return new Promise((resolveOpen, rejectOpen) => {
+    execFile("/usr/bin/open", ["-a", appName], (error) => {
+      if (error) rejectOpen(error);
+      else resolveOpen();
+    });
+  });
+}
+
+async function openDesktopDeepLink(
+  url: string,
+  target: { bundleId: string; label: string }
+): Promise<void> {
+  if (process.platform !== "darwin") {
+    await shell.openExternal(url);
+    return;
+  }
+
+  try {
+    await openMacBundle(target.bundleId);
+    await delay(350);
+    await openMacBundle(target.bundleId, url);
+    await delay(350);
+    await openMacBundle(target.bundleId);
+    return;
+  } catch (error) {
+    console.error(`Failed to activate ${target.label} before deep link:`, error);
+  }
+
+  await shell.openExternal(url);
+}
+
+async function openCodexSession(sessionId: string): Promise<void> {
   const threadId = sessionId.trim();
   if (!CODEX_THREAD_ID_PATTERN.test(threadId)) return;
-  void shell.openExternal(`codex://threads/${threadId}`).catch((error) => {
-    console.error("Failed to open Codex session:", error);
+  await openDesktopDeepLink(`codex://threads/${threadId}`, {
+    bundleId: CODEX_DESKTOP_BUNDLE_ID,
+    label: "Codex"
   });
 }
 
 async function openClaudeSession(sessionId: string): Promise<void> {
   const cliSessionId = sessionId.trim();
   if (!CODEX_THREAD_ID_PATTERN.test(cliSessionId)) return;
-  await shell.openExternal(`claude://resume?session=${encodeURIComponent(cliSessionId)}&pawpal=${Date.now()}`);
+  const resumeUrl = `claude://resume?session=${encodeURIComponent(cliSessionId)}&pawpal=${Date.now()}`;
+  await openDesktopDeepLink(resumeUrl, {
+    bundleId: CLAUDE_DESKTOP_BUNDLE_ID,
+    label: "Claude"
+  });
 }
 
-async function openAgentSession(sessionId: string): Promise<void> {
+async function openCursorSession(): Promise<void> {
+  if (process.platform === "darwin") {
+    await openMacAppByName("Cursor");
+    await delay(350);
+  }
+  await shell.openExternal("cursor://");
+}
+
+async function openAgentSession(sessionId: string, provider?: AgentActivityProvider): Promise<void> {
   try {
-    if (codexActivity.provider === "claude") {
+    if (provider === "claude") {
       await openClaudeSession(sessionId);
       return;
     }
-    if (codexActivity.provider === "codex") {
-      openCodexSession(sessionId);
+    if (provider === "codex") {
+      await openCodexSession(sessionId);
+      return;
+    }
+    if (provider === "cursor") {
+      await openCursorSession();
+      return;
     }
   } catch (error) {
     console.error("Failed to open agent session:", error);
@@ -2150,15 +2961,25 @@ async function checkForUpdates(options: { notifyAvailable?: boolean } = {}): Pro
 }
 
 function triggerBreakReminder(fromDemo: boolean): void {
-  if (blockingMode === "focusWarning" || blockingMode === "breakRun") return;
-  if (!fromDemo && (focusActive || breakMutedToday)) {
-    scheduleReminderTimers();
+  resetExpiredBreakMute();
+  if (!fromDemo && (blockingMode === "focusWarning" || blockingMode === "breakRun" || blockingMode === "hydration")) {
+    scheduleBreakBusyRetry();
+    return;
+  }
+  if (!fromDemo && focusActive) {
+    scheduleBreakBusyRetry();
+    return;
+  }
+  if (!fromDemo && breakMutedToday) {
     return;
   }
   ensurePetWindowVisible();
   blockingMode = "break";
   breakDueAt = null;
   publishSnapshot();
+  if (!fromDemo) {
+    updateStats((stats) => ({ ...stats, breakPromptsShown: stats.breakPromptsShown + 1 }));
+  }
   setPetState("breakPrompt");
   const labels = text();
   showBubble({
@@ -2174,7 +2995,7 @@ function triggerBreakReminder(fromDemo: boolean): void {
 
 function triggerHydrationReminder(fromDemo: boolean): void {
   if (blockingMode || (!fromDemo && focusActive)) {
-    scheduleReminderTimers();
+    if (!fromDemo && getSettings().hydrationReminderEnabled) scheduleHydrationBusyRetry();
     return;
   }
   ensurePetWindowVisible();
@@ -2200,7 +3021,7 @@ function triggerFocusWarning(rule?: string): void {
   blockingMode = "focusWarning";
   updateStats((stats) => ({ ...stats, focusWarnings: stats.focusWarnings + 1 }));
   setPetState("focusAlert");
-  sendToAll("app:snapshot", snapshot());
+  publishSnapshot();
   const labels = text();
   showBubble({
     id: "focus-warning",
@@ -2221,7 +3042,7 @@ function startFocusMode(): void {
   blockingMode = null;
   setPetState("focusGuard");
   focusEndsAt = Date.now() + settings.focusDurationMinutes * 60 * 1000;
-  sendToAll("app:snapshot", snapshot());
+  publishSnapshot();
   showBubble({
     id: "focus-start",
     message: pick(text().bubble.focusStart)(settings.focusDurationMinutes),
@@ -2253,7 +3074,7 @@ function stopFocusMode(completed: boolean): void {
     ...stats,
     focusMinutes: stats.focusMinutes + elapsedMinutes
   }));
-  sendToAll("app:snapshot", snapshot());
+  publishSnapshot();
   setPetState("focusDone");
   showBubble({
     id: "focus-complete",
@@ -2262,6 +3083,7 @@ function stopFocusMode(completed: boolean): void {
   });
   setTimeout(() => {
     if (!focusActive && !blockingMode) {
+      if (showOverdueReminder()) return;
       hideBubble();
       setPetState("idle");
     }
@@ -2293,6 +3115,17 @@ function triggerDemo(trigger: DemoTrigger): void {
 }
 
 function handleBubbleAction(actionId: string): void {
+  if (zoomMeetingJoinActions.has(actionId)) {
+    const joinUrl = zoomMeetingJoinActions.get(actionId);
+    zoomMeetingJoinActions.delete(actionId);
+    hideBubble();
+    if (joinUrl) void shell.openExternal(joinUrl);
+    return;
+  }
+  if (actionId === "zoom-meeting:dismiss") {
+    hideBubble();
+    return;
+  }
   if (actionId === "app:open-release-notes") {
     hideBubble();
     setPetState(focusActive ? "focusGuard" : "idle");
@@ -2310,17 +3143,18 @@ function handleBubbleAction(actionId: string): void {
   }
   if (actionId === "break:snooze") {
     resumeLongTermState();
-    if (breakTimer) clearTimeout(breakTimer);
-    breakDueAt = Date.now() + 10 * 60 * 1000;
-    breakTimer = setTimeout(() => triggerBreakReminder(false), 10 * 60 * 1000);
-    publishSnapshot();
+    scheduleBreakReminderTimer(10 * 60 * 1000);
     return;
   }
   if (actionId === "break:mute") {
     breakMutedToday = true;
+    breakMutedDate = todayKey();
+    scheduleBreakMuteReset();
+    if (breakTimer) clearTimeout(breakTimer);
+    breakTimer = null;
     breakDueAt = null;
     blockingMode = null;
-    sendToAll("app:snapshot", snapshot());
+    publishSnapshot();
     setPetState("sad");
     showBubble({ id: "break-muted", message: pick(text().bubble.breakIgnore), autoDismissMs: 2600 });
     setTimeout(resumeLongTermState, 2700);
@@ -2329,7 +3163,7 @@ function handleBubbleAction(actionId: string): void {
   if (actionId === "hydration:done") {
     updateStats((stats) => ({ ...stats, watersLogged: stats.watersLogged + 1 }));
     blockingMode = null;
-    sendToAll("app:snapshot", snapshot());
+    publishSnapshot();
     setPetState("drinking");
     hideBubble();
     setTimeout(() => {
@@ -2337,24 +3171,22 @@ function handleBubbleAction(actionId: string): void {
       setPetState("hydrationDone");
       showBubble({ id: "hydration-complete", message: pick(text().bubble.hydrationDone), autoDismissMs: 1800 });
       setTimeout(() => {
+        scheduleHydrationReminderTimer();
+        if (showOverdueReminder()) return;
         hideBubble();
         setPetState(focusActive ? "focusGuard" : "idle");
-        scheduleReminderTimers();
       }, 1900);
     }, 2400);
     return;
   }
   if (actionId === "hydration:snooze") {
     resumeLongTermState();
-    if (hydrationTimer) clearTimeout(hydrationTimer);
-    hydrationDueAt = Date.now() + 15 * 60 * 1000;
-    hydrationTimer = setTimeout(() => triggerHydrationReminder(false), 15 * 60 * 1000);
-    publishSnapshot();
+    scheduleHydrationReminderTimer(15 * 60 * 1000);
     return;
   }
   if (actionId === "focus:back") {
     blockingMode = null;
-    sendToAll("app:snapshot", snapshot());
+    publishSnapshot();
     setPetState("focusGuard");
     showBubble({ id: "focus-back", message: pick(text().bubble.focusBack), autoDismissMs: 1800 });
     setTimeout(() => {
@@ -2368,7 +3200,7 @@ function handleBubbleAction(actionId: string): void {
 }
 
 function registerIpc(): void {
-  ipcMain.handle("app:get-snapshot", () => snapshot());
+  ipcMain.handle("app:get-snapshot", (event) => snapshot(petSlotForWebContents(event.sender)));
   ipcMain.handle("app:check-for-updates", () => checkForUpdates({ notifyAvailable: true }));
   ipcMain.handle("custom-pet:select-asset", (_event, state: PetState) =>
     selectCustomPetAsset(state)
@@ -2377,21 +3209,27 @@ function registerIpc(): void {
     importCustomPetAsset(state, sourcePath)
   );
   ipcMain.on("app:open-release-notes", openReleaseNotes);
-  ipcMain.on("pet:clicked", () => {
+  ipcMain.on("pet:clicked", (event) => {
+    if (petSlotForWebContents(event.sender) !== "primary") return;
     if (blockingMode) return;
     happyFeedback(null);
   });
-  ipcMain.on("pet:context-menu", showPetContextMenu);
-  ipcMain.on("pet:drag-start", (_event, offset: { offsetX: number; offsetY: number }) =>
-    startPetDrag(offset)
+  ipcMain.on("pet:context-menu", (event) => showPetContextMenu(petSlotForWebContents(event.sender)));
+  ipcMain.on("pet:drag-start", (event, offset: { offsetX: number; offsetY: number }) =>
+    startPetDrag(petSlotForWebContents(event.sender), offset)
   );
-  ipcMain.on("pet:drag-stop", stopPetDrag);
-  ipcMain.on("pet:resize-start", startPetResize);
+  ipcMain.on("pet:drag-stop", (event) => stopPetDrag(petSlotForWebContents(event.sender)));
+  ipcMain.on("pet:resize-start", (event) => startPetResize(petSlotForWebContents(event.sender)));
   ipcMain.on("pet:resize-stop", stopPetResize);
-  ipcMain.on("agent:open-session", (_event, sessionId: string) => openAgentSession(sessionId));
-  ipcMain.on("codex:open-session", (_event, sessionId: string) => openAgentSession(sessionId));
+  ipcMain.on("agent:open-session", (_event, sessionId: string, provider?: AgentActivityProvider) =>
+    openAgentSession(sessionId, provider)
+  );
+  ipcMain.on("codex:open-session", (_event, sessionId: string) => openAgentSession(sessionId, "codex"));
+  ipcMain.on("app:open-settings", createSettingsWindow);
+  ipcMain.on("app:quit", runQuitAnimation);
+  ipcMain.on("pet:hide", hidePetWindowFromMenu);
   ipcMain.on("pet:set-mouse-interactive", (_event, interactive: boolean) => {
-    setPetMouseInteractive(interactive);
+    setPetMouseInteractive(petSlotForWebContents(_event.sender), interactive);
   });
   ipcMain.on("bubble:action", (_event, actionId: string) => handleBubbleAction(actionId));
   ipcMain.on("settings:update", (_event, partial: Partial<Settings>) => {
@@ -2438,12 +3276,15 @@ app.whenReady().then(() => {
   getStats();
   registerIpc();
   createPetWindow();
+  syncPetWindowsForSettings();
   createTray();
   registerDisplayChangeHandlers();
   registerPowerMonitorHandlers();
   scheduleCodexActivityPolling();
   scheduleReminderTimers();
   scheduleDistractionDetection();
+  scheduleZoomShareAutoHide();
+  scheduleZoomMeetingReminders();
   if (IS_DEV) {
     createSettingsWindow();
   }
@@ -2453,6 +3294,8 @@ app.whenReady().then(() => {
 
   app.on("activate", () => {
     if (!petWindow) createPetWindow();
+    syncPetWindowsForSettings();
+    updateTrayMenu();
   });
 });
 

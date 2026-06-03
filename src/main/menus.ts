@@ -110,8 +110,8 @@ export function buildPetContextMenuTemplate(
     ...(state.isPackaged ? [] : demoItems(labels, actions)),
     { type: "separator" },
     {
-      label: labels.hideDog,
-      click: actions.hideDog
+      label: state.dogVisible ? labels.hideDog : labels.showDog,
+      click: state.dogVisible ? actions.hideDog : actions.toggleDog
     },
     {
       label: labels.quit,

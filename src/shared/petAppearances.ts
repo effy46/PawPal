@@ -11,6 +11,8 @@ export type PetAssetDefinition = {
   path: string | string[];
   isPlaceholder?: boolean;
   replayIntervalMs?: number;
+  displayScale?: number;
+  displayYOffset?: number;
 };
 
 export type PetAppearanceManifest = {
@@ -44,6 +46,7 @@ const goldenPuppy = (state: PetState, name: string): string =>
   `pet_assets/金毛 puppy/${state}/${name}`;
 const lineDog = (state: PetState, name: string): string => `pet_assets/线条小狗/${state}/${name}`;
 const xiaoJiMao = (state: PetState, name: string): string => `pet_assets/小鸡毛/${state}/${name}`;
+const hachi = (state: PetState, name: string): string => `pet_assets/Hachi/${state}/${name}`;
 const quitRunningLineDog = (): string => lineDog("quitRunning", "running_dog_right.gif");
 const quitRunningGoldenPuppy = (): string => lineDog("quitRunning", "running_dog_left.gif");
 
@@ -296,18 +299,115 @@ export const PET_APPEARANCES: Record<BuiltInPetAppearanceId, PetAppearanceManife
         path: quitRunningGoldenPuppy()
       }
     }
+  },
+  hachi: {
+    id: "hachi",
+    label: {
+      "zh-CN": "小八",
+      en: "Hachi"
+    },
+    fallback: {
+      path: hachi("idle", "idle.gif"),
+      displayScale: 0.62,
+      displayYOffset: 4
+    },
+    states: {
+      idle: {
+        path: hachi("idle", "idle.gif"),
+        displayScale: 0.62,
+        displayYOffset: 4
+      },
+      sitting: {
+        path: hachi("sitting", "sitting.gif"),
+        displayScale: 0.64,
+        displayYOffset: 4
+      },
+      happy: {
+        path: hachi("happy", "happy.gif"),
+        displayScale: 0.72,
+        displayYOffset: 2
+      },
+      breakPrompt: {
+        path: hachi("sleeping", "sleeping.gif"),
+        displayScale: 0.64,
+        displayYOffset: 4
+      },
+      breakRunning: {
+        path: hachi("breakRunning", "break-running.gif"),
+        displayScale: 0.72,
+        displayYOffset: 4
+      },
+      breakDone: {
+        path: hachi("happy", "happy.gif"),
+        displayScale: 0.72,
+        displayYOffset: 2
+      },
+      hydrationPrompt: {
+        path: hachi("sitting", "sitting.gif"),
+        displayScale: 0.64,
+        displayYOffset: 4
+      },
+      focusGuard: {
+        path: hachi("focusGuard", "focus-guard.gif"),
+        displayScale: 0.72,
+        displayYOffset: 4
+      },
+      focusAlert: {
+        path: hachi("focusAlert", "focus-alert.gif"),
+        displayScale: 0.72,
+        displayYOffset: 4
+      },
+      focusDone: {
+        path: hachi("focusDone", "focus-done.gif"),
+        displayScale: 0.64,
+        displayYOffset: 4
+      },
+      hydrationDone: {
+        path: hachi("hydrationDone", "hydration-done.gif"),
+        displayScale: 0.64,
+        displayYOffset: 4
+      },
+      drinking: {
+        path: hachi("drinking", "drinking.gif"),
+        displayScale: 0.74,
+        displayYOffset: 4
+      },
+      sad: {
+        path: hachi("sad", "sad.gif"),
+        displayScale: 0.68,
+        displayYOffset: 4
+      },
+      sleeping: {
+        path: hachi("sleeping", "sleeping.gif"),
+        displayScale: 0.64,
+        displayYOffset: 4
+      },
+      quitRunning: {
+        path: hachi("breakRunning", "break-running.gif"),
+        displayScale: 0.72,
+        displayYOffset: 4
+      }
+    }
   }
 };
 
 export function resolvePetAppearanceId(value: unknown): PetAppearanceId {
-  if (value === "lineDog" || value === "lovartPuppy" || value === "xiaoJiMao" || value === "custom") {
+  if (
+    value === "lineDog" ||
+    value === "lovartPuppy" ||
+    value === "xiaoJiMao" ||
+    value === "hachi" ||
+    value === "custom"
+  ) {
     return value;
   }
   return "lineDog";
 }
 
 export function resolveBuiltInPetAppearanceId(value: unknown): BuiltInPetAppearanceId {
-  if (value === "lineDog" || value === "lovartPuppy" || value === "xiaoJiMao") return value;
+  if (value === "lineDog" || value === "lovartPuppy" || value === "xiaoJiMao" || value === "hachi") {
+    return value;
+  }
   return "lineDog";
 }
 

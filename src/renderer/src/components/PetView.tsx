@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { CSSProperties, JSX, MouseEvent as ReactMouseEvent, PointerEvent } from "react";
+import type { CSSProperties, JSX, MouseEvent as ReactMouseEvent, PointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { i18n, resolveLanguage } from "../../../shared/i18n";
 import type { CodexActivity, CodexActivityState, PetState, SpeechBubble } from "../../../shared/types";
 import { getPetAsset, getPetAssetVariantCount } from "../assets";
@@ -21,10 +21,13 @@ const DRAG_START_DISTANCE_PX = 10;
 const PET_BUTTON_SELECTOR = ".pet-button";
 const CODEX_INTERACTIVE_SELECTOR =
   ".codex-badge, .codex-count-badge, .codex-chat-stack, .codex-detail-popover";
-const BUBBLE_INTERACTIVE_SELECTOR = `.speech-bubble, ${CODEX_INTERACTIVE_SELECTOR}`;
-const MAX_EXPANDED_CODEX_SESSIONS = 3;
-const CODEX_STACK_SCROLL_STEP = 2;
+const BUBBLE_INTERACTIVE_SELECTOR = `.speech-bubble, .pet-context-menu, ${CODEX_INTERACTIVE_SELECTOR}`;
+const MAX_EXPANDED_CODEX_SESSIONS = 2;
 const CODEX_COMPLETE_CELEBRATION_MS = 3200;
+const CONTEXT_MENU_WIDTH_PX = 164;
+const CONTEXT_MENU_HEIGHT_PX = 170;
+const CONTEXT_MENU_OFFSET_PX = 8;
+const CONTEXT_MENU_MARGIN_PX = 10;
 
 const CODEX_STATE_TO_PET_STATE: Record<CodexActivityState, PetState> = {
   idle: "idle",
@@ -62,13 +65,15 @@ function codexActivityLabel(activity: CodexActivity, labels: SettingsCopy): stri
 }
 
 function agentActivityProviderName(activity: CodexActivity, labels: SettingsCopy): string {
-  return activity.provider === "claude" ? labels.claudeCode : labels.codex;
+  if (activity.provider === "claude") return labels.claudeCode;
+  if (activity.provider === "cursor") return labels.cursor;
+  return labels.codex;
 }
 
 function agentActivityChatsLabel(activity: CodexActivity, labels: SettingsCopy): string {
-  return activity.provider === "claude"
-    ? labels.claudeCodeChats(activity.sessions.length)
-    : labels.codexChats(activity.sessions.length);
+  if (activity.provider === "claude") return labels.claudeCodeChats(activity.sessions.length);
+  if (activity.provider === "cursor") return labels.cursorChats(activity.sessions.length);
+  return labels.codexChats(activity.sessions.length);
 }
 
 function stripCodexStatusPrefix(message: string): string {
@@ -146,6 +151,7 @@ export function PetView(): JSX.Element {
   const [resizeHotspot, setResizeHotspot] = useState(false);
   const [resizeHandlePoint, setResizeHandlePoint] = useState<{ left: number; top: number } | null>(null);
   const [codexAnchorLeft, setCodexAnchorLeft] = useState<number | null>(null);
+  const [contextMenuPoint, setContextMenuPoint] = useState<{ x: number; y: number } | null>(null);
   const agentSessionClickRef = useRef<{ sessionId: string; clickedAt: number } | null>(null);
   const codexDetailSessionIdRef = useRef<string | null>(null);
   const openedAgentSessionRef = useRef<{ sessionId: string; openedAt: number } | null>(null);
@@ -156,6 +162,7 @@ export function PetView(): JSX.Element {
   const lastMousePointRef = useRef<{ x: number; y: number } | null>(null);
   const language = resolveLanguage(snapshot.settings.language);
   const labels = i18n(language).settings;
+  const menuLabels = i18n(language).menu;
 
   useEffect(() => {
     const offBubble = window.pawpal.onShowBubble(setBubble);
@@ -167,6 +174,20 @@ export function PetView(): JSX.Element {
       offPetState();
     };
   }, []);
+
+  useEffect(() => {
+    if (!contextMenuPoint) return;
+    const close = (): void => setContextMenuPoint(null);
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [contextMenuPoint]);
 
   const codexState = snapshot.codexActivity.state;
   const showCodexActivity =
@@ -184,7 +205,7 @@ export function PetView(): JSX.Element {
   const appearanceId = snapshot.settings.petAppearanceId;
   const customAppearance = snapshot.settings.customPetAppearance;
   const invertQuitFacing =
-    state === "quitRunning" && (appearanceId === "lovartPuppy" || appearanceId === "xiaoJiMao");
+    state === "quitRunning" && (appearanceId === "lovartPuppy" || appearanceId === "xiaoJiMao" || appearanceId === "hachi");
   const facingClass =
     snapshot.petFacing === (invertQuitFacing ? "right" : "left") ? "facing-left" : "facing-right";
   const asset = getPetAsset(
@@ -208,10 +229,13 @@ export function PetView(): JSX.Element {
     snapshot.codexActivity.sessions.length - (codexStackStartIndex + visibleCodexSessions.length)
   );
   const hiddenNewerCodexSessionCount = codexStackStartIndex;
+  const hiddenTotalCodexSessionCount = hiddenCodexSessionCount + hiddenNewerCodexSessionCount;
   const petScaleStyle = { "--pet-scale": snapshot.petScale } as CSSProperties;
   const primaryCodexSession = codexPrimarySession(snapshot.codexActivity);
   const canOpenAgentSession =
-    snapshot.codexActivity.provider === "codex" || snapshot.codexActivity.provider === "claude";
+    snapshot.codexActivity.provider === "codex" ||
+    snapshot.codexActivity.provider === "claude" ||
+    snapshot.codexActivity.provider === "cursor";
   const activeCodexDetailSession =
     snapshot.codexActivity.sessions.find((session) => session.id === codexDetailSessionId) ??
     primaryCodexSession;
@@ -227,6 +251,8 @@ export function PetView(): JSX.Element {
   const codexDetailState = activeCodexDetailSession?.state ?? snapshot.codexActivity.state;
   const shellStyle = {
     ...petScaleStyle,
+    "--pet-asset-scale": asset.displayScale ?? 1,
+    "--pet-asset-y": `${asset.displayYOffset ?? 0}px`,
     ...(resizeHandlePoint
       ? {
           "--resize-handle-left": `${resizeHandlePoint.left}px`,
@@ -434,7 +460,7 @@ export function PetView(): JSX.Element {
     const opened = openedAgentSessionRef.current;
     if (opened?.sessionId === sessionId && now - opened.openedAt < 800) return;
     openedAgentSessionRef.current = { sessionId, openedAt: now };
-    window.pawpal.openAgentSession(sessionId);
+    window.pawpal.openAgentSession(sessionId, snapshot.codexActivity.provider);
   }
 
   function openAgentSession(event: ReactMouseEvent<HTMLElement>, sessionId?: string): void {
@@ -461,20 +487,48 @@ export function PetView(): JSX.Element {
   function showNewerCodexSessions(event: ReactMouseEvent<HTMLButtonElement>): void {
     event.preventDefault();
     event.stopPropagation();
-    setCodexStackStartIndex(0);
+    setCodexStackStartIndex((current) => Math.max(0, current - 1));
   }
 
   function showOlderCodexSessions(event: ReactMouseEvent<HTMLButtonElement>): void {
     event.preventDefault();
     event.stopPropagation();
-    setCodexStackStartIndex((current) => {
-      const remaining = Math.max(
-        0,
-        snapshot.codexActivity.sessions.length - (current + MAX_EXPANDED_CODEX_SESSIONS)
-      );
-      const step = remaining <= CODEX_STACK_SCROLL_STEP ? remaining : CODEX_STACK_SCROLL_STEP;
-      return Math.min(maxCodexStackStartIndex, current + step);
+    setCodexStackStartIndex((current) => Math.min(maxCodexStackStartIndex, current + 1));
+  }
+
+  function cycleCodexSessions(event: ReactMouseEvent<HTMLButtonElement>): void {
+    event.preventDefault();
+    event.stopPropagation();
+    setCodexStackStartIndex((current) => (current >= maxCodexStackStartIndex ? 0 : current + 1));
+  }
+
+  function scrollCodexSessions(event: ReactWheelEvent<HTMLElement>): void {
+    if (!maxCodexStackStartIndex) return;
+    const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+    if (Math.abs(delta) < 4) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    setCodexStackStartIndex((current) =>
+      Math.max(0, Math.min(maxCodexStackStartIndex, current + (delta > 0 ? 1 : -1)))
+    );
+  }
+
+  function openContextMenu(event: ReactMouseEvent<HTMLElement>): void {
+    event.preventDefault();
+    event.stopPropagation();
+    const minPoint = CONTEXT_MENU_MARGIN_PX + CONTEXT_MENU_OFFSET_PX;
+    const maxX = window.innerWidth - CONTEXT_MENU_WIDTH_PX + CONTEXT_MENU_OFFSET_PX - CONTEXT_MENU_MARGIN_PX;
+    const maxY = window.innerHeight - CONTEXT_MENU_HEIGHT_PX + CONTEXT_MENU_OFFSET_PX - CONTEXT_MENU_MARGIN_PX;
+    setContextMenuPoint({
+      x: Math.max(minPoint, Math.min(event.clientX, maxX)),
+      y: Math.max(minPoint, Math.min(event.clientY, maxY))
     });
+  }
+
+  function runContextAction(action: () => void): void {
+    setContextMenuPoint(null);
+    action();
   }
 
   return (
@@ -484,12 +538,38 @@ export function PetView(): JSX.Element {
       lang={language}
       style={shellStyle}
       aria-label="PawPal desktop pet"
-      onContextMenu={(event) => {
-        event.preventDefault();
-        window.pawpal.petContextMenu();
-      }}
+      onContextMenu={openContextMenu}
     >
       <div className="pet-stage">
+      {contextMenuPoint ? (
+        <section
+          className="pet-context-menu"
+          style={
+            {
+              "--menu-left": `${contextMenuPoint.x}px`,
+              "--menu-top": `${contextMenuPoint.y}px`
+            } as CSSProperties
+          }
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button type="button" onClick={() => runContextAction(window.pawpal.openSettings)}>
+            {menuLabels.settings}
+          </button>
+          <button
+            type="button"
+            onClick={() => runContextAction(snapshot.focusActive ? window.pawpal.stopFocus : window.pawpal.startFocus)}
+          >
+            {snapshot.focusActive ? menuLabels.stopFocusMode : menuLabels.startFocusMode}
+          </button>
+          <span aria-hidden="true" />
+          <button type="button" onClick={() => runContextAction(window.pawpal.hideDog)}>
+            {menuLabels.hideDog}
+          </button>
+          <button className="is-danger" type="button" onClick={() => runContextAction(window.pawpal.quit)}>
+            {menuLabels.quit}
+          </button>
+        </section>
+      ) : null}
       {bubble ? (
         <section className="speech-bubble">
           <p>{bubble.message}</p>
@@ -522,20 +602,11 @@ export function PetView(): JSX.Element {
           <>
             <section
               className={`codex-chat-stack${
-                hiddenCodexSessionCount ? " has-more" : ""
+                hiddenTotalCodexSessionCount ? " has-more" : ""
               }`}
               aria-label={codexActivityTooltip(snapshot.codexActivity, labels)}
+              onWheel={scrollCodexSessions}
             >
-              {hiddenNewerCodexSessionCount ? (
-                <button
-                  className="codex-chat-latest"
-                  onClick={showNewerCodexSessions}
-                  type="button"
-                  aria-label={labels.codexShowLatestChats}
-                >
-                  {labels.codexLatestChats}
-                </button>
-              ) : null}
               {visibleCodexSessions.map((session) => (
                 <article
                   className={`codex-chat-card codex-chat-card--${session.state}`}
@@ -556,15 +627,35 @@ export function PetView(): JSX.Element {
                   ) : null}
                 </article>
               ))}
-              {hiddenCodexSessionCount ? (
-                <button
-                  className="codex-chat-more"
-                  onClick={showOlderCodexSessions}
-                  type="button"
-                  aria-label={labels.codexShowOlderChats(hiddenCodexSessionCount)}
-                >
-                  {labels.codexOlderChats(hiddenCodexSessionCount)}
-                </button>
+              {hiddenTotalCodexSessionCount ? (
+                <div className="codex-chat-pager" aria-label={labels.codexMoreChats(hiddenTotalCodexSessionCount)}>
+                  <button
+                    className="codex-chat-pager-button"
+                    onClick={showNewerCodexSessions}
+                    type="button"
+                    aria-label={labels.codexShowLatestChats}
+                    disabled={!hiddenNewerCodexSessionCount}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    className="codex-chat-more"
+                    onClick={cycleCodexSessions}
+                    type="button"
+                    aria-label={labels.codexShowOlderChats(hiddenTotalCodexSessionCount)}
+                  >
+                    {labels.codexOlderChats(hiddenTotalCodexSessionCount)}
+                  </button>
+                  <button
+                    className="codex-chat-pager-button"
+                    onClick={showOlderCodexSessions}
+                    type="button"
+                    aria-label={labels.codexShowOlderChats(hiddenCodexSessionCount)}
+                    disabled={!hiddenCodexSessionCount}
+                  >
+                    ↓
+                  </button>
+                </div>
               ) : null}
             </section>
             <button

@@ -5,6 +5,7 @@ import type { AppSnapshot, TodayStats } from "../../shared/types";
 const initialStats: TodayStats = {
   date: "",
   breaksTaken: 0,
+  breakPromptsShown: 0,
   watersLogged: 0,
   focusMinutes: 0,
   focusWarnings: 0
@@ -44,6 +45,7 @@ export function useSnapshot(): AppSnapshot {
     petState: "idle",
     petFacing: "right",
     petScale: 1,
+    petSlotId: "primary",
     codexActivity: {
       state: "idle",
       message: null,

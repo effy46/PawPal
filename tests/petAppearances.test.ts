@@ -20,7 +20,7 @@ function pathsFor(appearanceId: PetAppearanceId, state: PetState): string[] {
 
 export const tests = [
   {
-    name: "petAppearanceOptions includes Xiao Ji Mao",
+    name: "petAppearanceOptions includes Xiao Ji Mao and Hachi",
     run(): void {
       assert.equal(
         petAppearanceOptions("zh-CN").some((option) => option.value === "xiaoJiMao"),
@@ -30,12 +30,21 @@ export const tests = [
         petAppearanceOptions("en").some((option) => option.value === "xiaoJiMao"),
         true
       );
+      assert.equal(
+        petAppearanceOptions("zh-CN").some((option) => option.value === "hachi"),
+        true
+      );
+      assert.equal(
+        petAppearanceOptions("en").some((option) => option.value === "hachi"),
+        true
+      );
     }
   },
   {
-    name: "resolvePetAppearanceId accepts Xiao Ji Mao",
+    name: "resolvePetAppearanceId accepts Xiao Ji Mao and Hachi",
     run(): void {
       assert.equal(resolvePetAppearanceId("xiaoJiMao"), "xiaoJiMao");
+      assert.equal(resolvePetAppearanceId("hachi"), "hachi");
     }
   },
   {
@@ -60,23 +69,29 @@ export const tests = [
     }
   },
   {
-    name: "Xiao Ji Mao asset paths exist for all pet states",
+    name: "Xiao Ji Mao and Hachi asset paths exist for all pet states",
     run(): void {
       for (const state of petStates) {
         for (const path of pathsFor("xiaoJiMao", state)) {
+          assert.equal(existsSync(resolve(process.cwd(), path)), true, path);
+        }
+        for (const path of pathsFor("hachi", state)) {
           assert.equal(existsSync(resolve(process.cwd(), path)), true, path);
         }
       }
     }
   },
   {
-    name: "quit animation uses yellow asset for non-line dogs and white asset for Line Dog",
+    name: "quit animation uses per-appearance asset for Line Dog, Xiao Ji Mao, and Hachi",
     run(): void {
       assert.deepEqual(pathsFor("lovartPuppy", "quitRunning"), [
         "pet_assets/线条小狗/quitRunning/running_dog_left.gif"
       ]);
       assert.deepEqual(pathsFor("xiaoJiMao", "quitRunning"), [
         "pet_assets/线条小狗/quitRunning/running_dog_left.gif"
+      ]);
+      assert.deepEqual(pathsFor("hachi", "quitRunning"), [
+        "pet_assets/Hachi/breakRunning/break-running.gif"
       ]);
       assert.deepEqual(pathsFor("lineDog", "quitRunning"), [
         "pet_assets/线条小狗/quitRunning/running_dog_right.gif"
