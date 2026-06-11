@@ -17,14 +17,28 @@ function normalizeNumber(value: unknown, fallback: number, min: number, max = Nu
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
-function isAgentActivitySource(value: unknown): value is AgentActivitySource {
-  return value === "codex" || value === "claude" || value === "cursor" || value === "none";
+function normalizeAgentActivitySource(value: unknown): AgentActivitySource | null {
+  if (value === "claude") return "claude-code";
+  if (
+    value === "codex" ||
+    value === "claude-code" ||
+    value === "claude-desktop" ||
+    value === "cursor" ||
+    value === "none"
+  ) {
+    return value;
+  }
+  return null;
 }
 
 function defaultAgentSourceForAppearance(appearanceId: PetAppearanceId): AgentActivitySource {
   if (appearanceId === "lineDog") return "codex";
-  if (appearanceId === "xiaoJiMao") return "claude";
+  if (appearanceId === "xiaoJiMao") return "claude-code";
   return "none";
+}
+
+function alternateAgentSource(source: AgentActivitySource): AgentActivitySource {
+  return source === "codex" ? "claude-code" : "codex";
 }
 
 function isHachiCustomPetAppearance(custom: CustomPetAppearance | null): boolean {
@@ -53,7 +67,7 @@ function normalizeAgentSources(
   }
   return {
     primaryAgentSource,
-    secondaryAgentSource: primaryAgentSource === "codex" ? "claude" : "codex"
+    secondaryAgentSource: alternateAgentSource(primaryAgentSource)
   };
 }
 
@@ -77,12 +91,10 @@ export function normalizeSettings(stored: Partial<Settings> = {}): Settings {
       : secondaryPetAppearanceId;
   const dualAgentModeEnabled = stored.dualAgentModeEnabled === true;
   const normalizedSources = normalizeAgentSources(
-    isAgentActivitySource(stored.primaryAgentSource)
-      ? stored.primaryAgentSource
-      : defaultAgentSourceForAppearance(normalizedPetAppearanceId),
-    isAgentActivitySource(stored.secondaryAgentSource)
-      ? stored.secondaryAgentSource
-      : defaultAgentSourceForAppearance(normalizedSecondaryPetAppearanceId),
+    normalizeAgentActivitySource(stored.primaryAgentSource) ??
+      defaultAgentSourceForAppearance(normalizedPetAppearanceId),
+    normalizeAgentActivitySource(stored.secondaryAgentSource) ??
+      defaultAgentSourceForAppearance(normalizedSecondaryPetAppearanceId),
     dualAgentModeEnabled
   );
 

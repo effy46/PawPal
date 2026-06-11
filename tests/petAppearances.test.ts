@@ -5,13 +5,43 @@ import {
   getCustomPetAssetDefinition,
   getPetAssetDefinition,
   hasRequiredCustomPetAssets,
+  REQUIRED_CUSTOM_PET_STATES,
   PET_STATE_ORDER,
   petAppearanceOptions,
   resolvePetAppearanceId
 } from "../src/shared/petAppearances";
-import type { CustomPetAppearance, PetAppearanceId, PetState } from "../src/shared/types";
+import type { CustomPetLibrary, CustomPetManifest, PetAppearanceId, PetState } from "../src/shared/types";
 
 const petStates: PetState[] = PET_STATE_ORDER;
+
+function completeManifest(id = "buddy", status: CustomPetManifest["status"] = "complete"): CustomPetManifest {
+  const generationId = "gen-1";
+  return {
+    id,
+    name: "Buddy",
+    status,
+    generationId,
+    createdAt: 1,
+    updatedAt: 2,
+    assets: Object.fromEntries(
+      PET_STATE_ORDER.map((state) => [
+        state,
+        {
+          relativePath: `custom_pets/${id}/normalized/${generationId}/${state}.gif`,
+          originalName: `${state}.gif`,
+          updatedAt: 2
+        }
+      ])
+    ) as CustomPetManifest["assets"]
+  };
+}
+
+function libraryFor(...manifests: CustomPetManifest[]): CustomPetLibrary {
+  return {
+    updatedAt: 3,
+    manifests: Object.fromEntries(manifests.map((manifest) => [manifest.id, manifest]))
+  };
+}
 
 function pathsFor(appearanceId: PetAppearanceId, state: PetState): string[] {
   const asset = getPetAssetDefinition(appearanceId, state);
@@ -48,23 +78,47 @@ export const tests = [
     }
   },
   {
-    name: "custom pet assets require idle and fall back to idle for missing states",
+    name: "custom pet required states match all pet states",
     run(): void {
-      const custom: CustomPetAppearance = {
-        name: "Custom",
-        assets: {
-          idle: {
-            relativePath: "custom_pet_assets/idle/idle.gif",
-            originalName: "idle.gif",
-            updatedAt: 1
-          }
-        }
-      };
+      assert.deepEqual(REQUIRED_CUSTOM_PET_STATES, PET_STATE_ORDER);
+    }
+  },
+  {
+    name: "resolvePetAppearanceId accepts namespaced custom pet ids and preserves legacy custom input",
+    run(): void {
+      assert.equal(resolvePetAppearanceId("custom:buddy"), "custom:buddy");
+      assert.equal(resolvePetAppearanceId("custom"), "custom");
+    }
+  },
+  {
+    name: "complete custom pet resolves canonical state asset path",
+    run(): void {
+      const library = libraryFor(completeManifest("buddy"));
 
-      assert.equal(hasRequiredCustomPetAssets(custom), true);
-      assert.deepEqual(getCustomPetAssetDefinition(custom, "focusAlert"), {
-        path: "custom_pet_assets/idle/idle.gif",
-        isPlaceholder: true
+      assert.deepEqual(getPetAssetDefinition("custom:buddy", "focusAlert", library), {
+        path: "custom_pets/buddy/normalized/gen-1/focusAlert.gif"
+      });
+    }
+  },
+  {
+    name: "draft and incomplete custom pets are not selectable",
+    run(): void {
+      const draft = completeManifest("drafty", "draft");
+      const incomplete = completeManifest("partial");
+      delete incomplete.assets.focusAlert;
+
+      assert.equal(getCustomPetAssetDefinition(libraryFor(draft), "custom:drafty", "idle"), null);
+      assert.equal(getCustomPetAssetDefinition(libraryFor(incomplete), "custom:partial", "idle"), null);
+    }
+  },
+  {
+    name: "legacy inline custom pet assets require all pet states",
+    run(): void {
+      const legacy = completeManifest("legacy");
+
+      assert.equal(hasRequiredCustomPetAssets(legacy), true);
+      assert.deepEqual(getCustomPetAssetDefinition(legacy, "custom:legacy", "focusAlert"), {
+        path: "custom_pets/legacy/normalized/gen-1/focusAlert.gif"
       });
     }
   },

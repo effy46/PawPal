@@ -2,12 +2,14 @@ export type Language = "zh-CN" | "en";
 
 export type BuiltInPetAppearanceId = "lovartPuppy" | "lineDog" | "xiaoJiMao" | "hachi";
 
-export type PetAppearanceId = BuiltInPetAppearanceId | "custom";
+export type CustomPetAppearanceId = `custom:${string}`;
+export type LegacyCustomPetAppearanceId = "custom";
+export type PetAppearanceId = BuiltInPetAppearanceId | CustomPetAppearanceId | LegacyCustomPetAppearanceId;
 
 export type PetFacing = "left" | "right";
 
 export type CodexActivityState = "idle" | "working" | "reviewing" | "complete" | "waiting" | "error";
-export type AgentActivityProvider = "codex" | "claude" | "cursor";
+export type AgentActivityProvider = "codex" | "claude-code" | "claude-desktop" | "cursor";
 export type AgentActivitySource = AgentActivityProvider | "none";
 export type PetSlotId = "primary" | "secondary";
 
@@ -26,7 +28,7 @@ export type CodexActivity = {
   updatedAt: number | null;
   path: string;
   provider: AgentActivityProvider;
-  source: "manual" | "codex-session" | "claude-session" | "cursor-session";
+  source: "manual" | "codex-session" | "claude-code-session" | "claude-desktop-session" | "cursor-session";
   sessions: CodexActivitySession[];
 };
 
@@ -56,6 +58,81 @@ export type CustomPetAsset = {
 export type CustomPetAppearance = {
   name: string;
   assets: Partial<Record<PetState, CustomPetAsset>>;
+};
+
+export type CustomPetStatus = "complete" | "draft" | "error";
+export type CustomPetGenerationStatus = "queued" | "running" | "needs_input" | "complete" | "error";
+export type CustomPetGenerationStateStatus = CustomPetGenerationStatus;
+
+export type CustomPetManifest = {
+  id: string;
+  name: string;
+  status: CustomPetStatus;
+  generationId: string;
+  createdAt: number;
+  updatedAt: number;
+  assets: Partial<Record<PetState, CustomPetAsset>>;
+  error?: string | null;
+};
+
+export type CustomPetJobStateSummary = {
+  state: PetState;
+  status: CustomPetGenerationStateStatus;
+  sourceRelativePath?: string;
+  normalizedRelativePath?: string;
+  error?: string | null;
+};
+
+export type CustomPetJobSummary = {
+  petId: string;
+  generationId?: string;
+  status: CustomPetGenerationStatus;
+  createdAt?: number;
+  updatedAt: number;
+  states?: Partial<Record<PetState, CustomPetJobStateSummary>>;
+  error?: string | null;
+};
+
+export type CreateCustomPetGenerationInput = {
+  displayName: string;
+  prompt: string;
+};
+
+export type CustomPetGenerationActions = {
+  canResume: boolean;
+  threadId: string | null;
+  promptPath: string;
+  cwd: string;
+  openCodexInstructions: string;
+  copyCliFallbackText: string;
+};
+
+export type CreatedCustomPetGenerationJob = {
+  petId: string;
+  displayName: string;
+  status: CustomPetGenerationStatus;
+  createdAt: number;
+  updatedAt: number;
+  promptPath: string;
+  promptText: string;
+  sourceDir: string;
+  actions: CustomPetGenerationActions;
+};
+
+export type CompleteCustomPetGenerationInput = {
+  petId: string;
+};
+
+export type CompleteCustomPetGenerationResult = {
+  manifest: CustomPetManifest | null;
+  job: CustomPetJobSummary | null;
+  errors: string[];
+};
+
+export type CustomPetLibrary = {
+  updatedAt: number;
+  manifests: Record<string, CustomPetManifest>;
+  jobs?: Record<string, CustomPetJobSummary>;
 };
 
 export type BubbleAction = {
@@ -135,6 +212,7 @@ export type AppSnapshot = {
   settings: Settings;
   stats: TodayStats;
   statsHistory: StatsHistory;
+  customPetLibrary: CustomPetLibrary;
   timers: TimerStatus;
   distraction: DistractionStatus;
   petState: PetState;

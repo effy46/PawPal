@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, JSX, MouseEvent as ReactMouseEvent, PointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { i18n, resolveLanguage } from "../../../shared/i18n";
+import { isCustomPetAppearanceId } from "../../../shared/petAppearances";
 import type { CodexActivity, CodexActivityState, PetState, SpeechBubble } from "../../../shared/types";
 import { getPetAsset, getPetAssetVariantCount } from "../assets";
 import { useNow, useSnapshot } from "../hooks";
@@ -65,13 +66,15 @@ function codexActivityLabel(activity: CodexActivity, labels: SettingsCopy): stri
 }
 
 function agentActivityProviderName(activity: CodexActivity, labels: SettingsCopy): string {
-  if (activity.provider === "claude") return labels.claudeCode;
+  if (activity.provider === "claude-code") return labels.claudeCode;
+  if (activity.provider === "claude-desktop") return labels.claudeDesktop;
   if (activity.provider === "cursor") return labels.cursor;
   return labels.codex;
 }
 
 function agentActivityChatsLabel(activity: CodexActivity, labels: SettingsCopy): string {
-  if (activity.provider === "claude") return labels.claudeCodeChats(activity.sessions.length);
+  if (activity.provider === "claude-code") return labels.claudeCodeChats(activity.sessions.length);
+  if (activity.provider === "claude-desktop") return labels.claudeDesktopChats(activity.sessions.length);
   if (activity.provider === "cursor") return labels.cursorChats(activity.sessions.length);
   return labels.codexChats(activity.sessions.length);
 }
@@ -204,6 +207,12 @@ export function PetView(): JSX.Element {
   const altText = `PawPal ${state}`;
   const appearanceId = snapshot.settings.petAppearanceId;
   const customAppearance = snapshot.settings.customPetAppearance;
+  const customAssetSource =
+    appearanceId === "custom"
+      ? customAppearance
+      : isCustomPetAppearanceId(appearanceId)
+        ? snapshot.customPetLibrary
+        : undefined;
   const invertQuitFacing =
     state === "quitRunning" && (appearanceId === "lovartPuppy" || appearanceId === "xiaoJiMao" || appearanceId === "hachi");
   const facingClass =
@@ -213,7 +222,7 @@ export function PetView(): JSX.Element {
     state,
     assetVariant,
     assetReplayKey,
-    customAppearance,
+    customAssetSource,
     snapshot.petFacing
   );
   const maxCodexStackStartIndex = Math.max(
@@ -234,7 +243,8 @@ export function PetView(): JSX.Element {
   const primaryCodexSession = codexPrimarySession(snapshot.codexActivity);
   const canOpenAgentSession =
     snapshot.codexActivity.provider === "codex" ||
-    snapshot.codexActivity.provider === "claude" ||
+    snapshot.codexActivity.provider === "claude-code" ||
+    snapshot.codexActivity.provider === "claude-desktop" ||
     snapshot.codexActivity.provider === "cursor";
   const activeCodexDetailSession =
     snapshot.codexActivity.sessions.find((session) => session.id === codexDetailSessionId) ??
@@ -312,7 +322,7 @@ export function PetView(): JSX.Element {
   }
 
   useEffect(() => {
-    const variantCount = getPetAssetVariantCount(appearanceId, state, customAppearance);
+    const variantCount = getPetAssetVariantCount(appearanceId, state, customAssetSource);
     setAssetVariant(randomVariant(variantCount));
     setAssetReplayKey(0);
     if (!CONTINUOUS_ASSET_STATES.has(state) || variantCount <= 1) return;
@@ -320,7 +330,7 @@ export function PetView(): JSX.Element {
       setAssetVariant((current) => randomVariant(variantCount, current));
     }, CONTINUOUS_ASSET_ROTATION_MS);
     return () => window.clearInterval(timer);
-  }, [appearanceId, customAppearance, state, stateSignal]);
+  }, [appearanceId, customAssetSource, state, stateSignal]);
 
   useEffect(() => {
     if (!asset.replayIntervalMs) return;
@@ -460,7 +470,8 @@ export function PetView(): JSX.Element {
     const opened = openedAgentSessionRef.current;
     if (opened?.sessionId === sessionId && now - opened.openedAt < 800) return;
     openedAgentSessionRef.current = { sessionId, openedAt: now };
-    window.pawpal.openAgentSession(sessionId, snapshot.codexActivity.provider);
+    const sessionTitle = snapshot.codexActivity.sessions.find((session) => session.id === sessionId)?.title;
+    window.pawpal.openAgentSession(sessionId, snapshot.codexActivity.provider, sessionTitle);
   }
 
   function openAgentSession(event: ReactMouseEvent<HTMLElement>, sessionId?: string): void {

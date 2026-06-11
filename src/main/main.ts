@@ -34,7 +34,14 @@ import type {
   CodexActivitySession,
   CodexActivityState,
   AgentActivityProvider,
+  CompleteCustomPetGenerationInput,
+  CompleteCustomPetGenerationResult,
+  CreateCustomPetGenerationInput,
+  CreatedCustomPetGenerationJob,
   CustomPetAsset,
+  CustomPetJobSummary,
+  CustomPetLibrary,
+  CustomPetManifest,
   DistractionStatus,
   DemoTrigger,
   PetFacing,
@@ -126,6 +133,12 @@ const store = new Store<StoreSchema>({
     statsHistory: {}
   }
 });
+let customPetStore: CustomPetStore | null = null;
+let customPetLibrary: CustomPetLibrary = {
+  updatedAt: Date.now(),
+  manifests: {},
+  jobs: {}
+};
 
 let petWindow: BrowserWindow | null = null;
 let secondaryPetWindow: BrowserWindow | null = null;
@@ -267,12 +280,21 @@ let agentActivities: Record<AgentActivityProvider, CodexActivity> = {
     source: "manual",
     sessions: []
   },
-  claude: {
+  "claude-code": {
     state: "idle",
     message: null,
     updatedAt: null,
     path: claudeProjectsRoot(),
-    provider: "claude",
+    provider: "claude-code",
+    source: "manual",
+    sessions: []
+  },
+  "claude-desktop": {
+    state: "idle",
+    message: null,
+    updatedAt: null,
+    path: claudeProjectsRoot(),
+    provider: "claude-desktop",
     source: "manual",
     sessions: []
   },
@@ -292,6 +314,27 @@ const CODEX_SESSION_POLL_MS = 1000;
 const CODEX_SESSION_FILE_CACHE_MS = 10 * 1000;
 const CODEX_DESKTOP_BUNDLE_ID = "com.openai.codex";
 const CLAUDE_DESKTOP_BUNDLE_ID = "com.anthropic.claudefordesktop";
+const CLAUDE_CODE_TERMINAL_PROCESSES = [
+  "Terminal",
+  "iTerm2",
+  "Warp",
+  "Ghostty",
+  "WezTerm",
+  "kitty",
+  "Alacritty",
+  "Code",
+  "Visual Studio Code",
+  "Cursor"
+];
+const CLAUDE_CODE_TERMINAL_BUNDLES = [
+  "com.mitchellh.ghostty",
+  "dev.warp.Warp-Stable",
+  "com.googlecode.iterm2",
+  "com.apple.Terminal",
+  "com.github.wez.wezterm",
+  "net.kovidgoyal.kitty",
+  "org.alacritty"
+];
 const CODEX_THREAD_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -340,12 +383,22 @@ type ClaudeSessionEvent = {
   type?: string;
   uuid?: string;
   sessionId?: string;
+  bridgeSessionId?: string;
+  lastPrompt?: string;
+  aiTitle?: string;
+  customTitle?: string;
+  agentId?: string;
+  result?: {
+    status?: string;
+    summary?: string;
+    issues?: unknown[];
+  };
   cwd?: string;
+  entrypoint?: string;
   timestamp?: string;
   summary?: string;
   title?: string;
   name?: string;
-  lastPrompt?: string;
   message?: {
     role?: string;
     content?: string | ClaudeContentBlock[];
@@ -432,7 +485,7 @@ function emptyAgentActivity(provider: AgentActivityProvider = "codex"): CodexAct
     message: null,
     updatedAt: null,
     path:
-      provider === "claude"
+      provider === "claude-code" || provider === "claude-desktop"
         ? claudeProjectsRoot()
         : provider === "cursor"
           ? cursorLogsRoot()
@@ -444,7 +497,7 @@ function emptyAgentActivity(provider: AgentActivityProvider = "codex"): CodexAct
 }
 
 function isAgentActivityProvider(value: AgentActivitySource): value is AgentActivityProvider {
-  return value === "codex" || value === "claude" || value === "cursor";
+  return value === "codex" || value === "claude-code" || value === "claude-desktop" || value === "cursor";
 }
 
 function agentSourceForSlot(slot: PetSlotId): AgentActivitySource {
@@ -577,6 +630,195 @@ async function selectCustomPetAsset(state: PetState): Promise<CustomPetAsset | n
   return importCustomPetAsset(state, result.filePaths[0]);
 }
 
+function customPetSlug(value: string): string {
+  const slug = value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 42);
+  return slug || "custom-pet";
+}
+
+function isSafeCustomPetId(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value);
+}
+
+function buildCustomPetGenerationPrompt(input: CreateCustomPetGenerationInput, sourceDir: string): string {
+  const userPrompt = input.prompt.trim();
+  const displayName = input.displayName.trim() || "Custom Pet";
+  return [
+    "# PawPal Custom Pet Generation",
+    "",
+    `Pet name: ${displayName}`,
+    "",
+    "User prompt:",
+    userPrompt,
+    "",
+    "Required workflow:",
+    "- Read and follow the local hatch-pet skill before producing assets:",
+    "  /Users/ffeng/.codex/skills/hatch-pet/SKILL.md",
+    "- Use hatch-pet's visual-generation and visual-QA approach: establish one canonical base identity, generate state poses from that identity, inspect a contact sheet, and reject identity/style drift.",
+    "- Adapt hatch-pet output to PawPal's separate-GIF state contract below; do not create Codex's 9-row atlas unless it is only an intermediate visual planning aid.",
+    "- Do not hand-draw the character with Python, canvas, SVG, or procedural shapes. Code may only be used for deterministic file assembly, conversion, validation, contact sheets, and copying outputs.",
+    "- If real visual generation is unavailable, stop and report that generation is blocked instead of creating placeholder art.",
+    "",
+    "Create transparent animated GIFs for PawPal. Output exactly one GIF per state directly in this folder:",
+    sourceDir,
+    "",
+    "Required filenames:",
+    ...PET_STATE_ORDER.map((state) => `- ${state}.gif`),
+    "",
+    "Strict requirements:",
+    "- preserve one consistent character identity across every state",
+    "- transparent background, no labels, no grid, no shadow plate",
+    "- animated GIF, at least 2 frames per state",
+    "- keep the pet compact and readable at desktop-pet size",
+    "- do not write final pet.json or normalized assets; PawPal will validate and normalize"
+  ].join("\n");
+}
+
+async function refreshCustomPetLibrary(): Promise<CustomPetLibrary> {
+  if (!customPetStore) return customPetLibrary;
+  customPetLibrary = await customPetStore.rebuildIndex();
+  publishSnapshot();
+  return customPetLibrary;
+}
+
+async function createCustomPetGenerationJob(
+  input: CreateCustomPetGenerationInput
+): Promise<CreatedCustomPetGenerationJob | null> {
+  if (!customPetStore) return null;
+  const displayName = typeof input.displayName === "string" ? input.displayName.trim() : "";
+  const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
+  if (!prompt) return null;
+  const petId = `${customPetSlug(displayName || prompt)}-${Date.now().toString(36)}`;
+  const sourceDir = join(customPetStore.rootDir, petId, "source");
+  const promptText = buildCustomPetGenerationPrompt({ displayName, prompt }, sourceDir);
+  const job = await createCustomPetJob({
+    customPetsRoot: customPetStore.rootDir,
+    petId,
+    displayName: displayName || "Custom Pet",
+    prompt: promptText,
+    cwd: process.cwd()
+  });
+  await refreshCustomPetLibrary();
+  return { ...job, promptText };
+}
+
+function summarizeCustomPetJob(job: Awaited<ReturnType<typeof reconcileCustomPetJob>>): CustomPetJobSummary {
+  return {
+    petId: job.petId,
+    generationId: job.id,
+    status: job.status,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    states: Object.fromEntries(
+      job.states.map((state) => [
+        state.state,
+        {
+          state: state.state,
+          status: state.status,
+          sourceRelativePath: state.sourceRelativePath ?? (
+            state.sourcePath ? `custom_pets/${job.petId}/source/${state.state}.gif` : undefined
+          ),
+          normalizedRelativePath: state.normalizedRelativePath,
+          error: state.error
+        }
+      ])
+    ) as CustomPetJobSummary["states"]
+  };
+}
+
+async function writeCustomPetJobJson(job: Awaited<ReturnType<typeof reconcileCustomPetJob>>): Promise<void> {
+  await writeFile(job.jobPath, `${JSON.stringify(job, null, 2)}\n`, "utf8");
+}
+
+async function completeCustomPetGenerationJob(
+  input: CompleteCustomPetGenerationInput
+): Promise<CompleteCustomPetGenerationResult> {
+  if (!customPetStore || typeof input.petId !== "string" || !isSafeCustomPetId(input.petId)) {
+    return { manifest: null, job: null, errors: ["Invalid custom pet id."] };
+  }
+
+  const now = Date.now();
+  const jobPath = join(customPetStore.rootDir, input.petId, "job.json");
+  const reconciled = await reconcileCustomPetJob(jobPath, now);
+  if (reconciled.status !== "complete") {
+    customPetLibrary = await customPetStore.rebuildIndex();
+    publishSnapshot();
+    return {
+      manifest: null,
+      job: summarizeCustomPetJob(reconciled),
+      errors: [`Missing required GIFs. Expected all 15 files in ${reconciled.sourceDir}.`]
+    };
+  }
+
+  const normalized = await normalizeCustomPetBundle({
+    userDataPath: app.getPath("userData"),
+    petId: reconciled.petId,
+    generationId: reconciled.id
+  });
+
+  if (!normalized.ok) {
+    const errorsByState = new Map(normalized.stateErrors.map((item) => [item.state, item.message]));
+    const failedJob = {
+      ...reconciled,
+      status: "error" as const,
+      updatedAt: now,
+      states: reconciled.states.map((state) => ({
+        ...state,
+        status: errorsByState.has(state.state) ? "error" as const : state.status,
+        error: errorsByState.get(state.state) ?? state.error
+      }))
+    };
+    await writeCustomPetJobJson(failedJob);
+    await refreshCustomPetLibrary();
+    return {
+      manifest: null,
+      job: summarizeCustomPetJob(failedJob),
+      errors: normalized.stateErrors.map((item) => `${item.state}: ${item.message}`)
+    };
+  }
+
+  const manifest: CustomPetManifest = {
+    id: reconciled.petId,
+    name: reconciled.displayName,
+    status: "complete",
+    generationId: reconciled.id,
+    createdAt: reconciled.createdAt,
+    updatedAt: now,
+    assets: Object.fromEntries(
+      PET_STATE_ORDER.map((state) => [
+        state,
+        {
+          relativePath: normalized.outputs[state]!.relativePath,
+          originalName: `${state}.gif`,
+          updatedAt: now
+        }
+      ])
+    ) as CustomPetManifest["assets"]
+  };
+  const completedJob = {
+    ...reconciled,
+    status: "complete" as const,
+    updatedAt: now,
+    states: reconciled.states.map((state) => ({
+      ...state,
+      status: "complete" as const,
+      updatedAt: state.updatedAt ?? now,
+      error: null,
+      sourceRelativePath: normalized.outputs[state.state]?.sourceRelativePath,
+      normalizedRelativePath: normalized.outputs[state.state]?.relativePath
+    }))
+  };
+  await writeCustomPetJobJson(completedJob);
+  await customPetStore.saveManifest(manifest);
+  customPetLibrary = await customPetStore.rebuildIndex();
+  publishSnapshot();
+  return { manifest, job: summarizeCustomPetJob(completedJob), errors: [] };
+}
+
 function petWindowForSlot(slot: PetSlotId): BrowserWindow | null {
   return slot === "primary" ? petWindow : secondaryPetWindow;
 }
@@ -620,6 +862,7 @@ function snapshot(slot: PetSlotId = "primary"): AppSnapshot {
     },
     stats: getStats(),
     statsHistory: getStatsHistory(store),
+    customPetLibrary,
     timers: {
       breakDueAt: isPrimary ? breakDueAt : null,
       hydrationDueAt: isPrimary ? hydrationDueAt : null,
@@ -686,6 +929,12 @@ function isCodexActivityState(value: unknown): value is CodexActivityState {
   );
 }
 
+function normalizeAgentActivityProvider(value: unknown): AgentActivityProvider {
+  if (value === "claude") return "claude-code";
+  if (value === "claude-code" || value === "claude-desktop" || value === "cursor") return value;
+  return "codex";
+}
+
 function normalizeCodexActivity(value: unknown): CodexActivity {
   const path = codexActivityPath();
   if (!value || typeof value !== "object") {
@@ -693,11 +942,20 @@ function normalizeCodexActivity(value: unknown): CodexActivity {
   }
   const source = value as Partial<CodexActivity>;
   const state = isCodexActivityState(source.state) ? source.state : "idle";
-  const provider = source.provider === "claude" || source.provider === "cursor" ? source.provider : "codex";
-  const activitySource =
-    source.source === "codex-session" || source.source === "claude-session" || source.source === "cursor-session"
-      ? source.source
-      : "manual";
+  const provider = normalizeAgentActivityProvider(source.provider);
+  const rawActivitySource = (source as { source?: unknown }).source;
+  const activitySource = (() => {
+    if (rawActivitySource === "claude-session") return "claude-code-session";
+    if (
+      rawActivitySource === "codex-session" ||
+      rawActivitySource === "claude-code-session" ||
+      rawActivitySource === "claude-desktop-session" ||
+      rawActivitySource === "cursor-session"
+    ) {
+      return rawActivitySource;
+    }
+    return "manual";
+  })();
   const sessions = Array.isArray(source.sessions)
     ? source.sessions
         .filter((session): session is CodexActivitySession => {
@@ -717,7 +975,12 @@ function normalizeCodexActivity(value: unknown): CodexActivity {
     state,
     message: typeof source.message === "string" && source.message.trim() ? source.message.trim() : null,
     updatedAt: typeof source.updatedAt === "number" ? source.updatedAt : Date.now(),
-    path,
+    path:
+      provider === "claude-code" || provider === "claude-desktop"
+        ? claudeProjectsRoot()
+        : provider === "cursor"
+          ? cursorLogsRoot()
+          : path,
     provider,
     source: activitySource,
     sessions
@@ -772,7 +1035,7 @@ async function writeCodexActivityDemo(state: CodexActivityState, message: string
     message,
     updatedAt: Date.now(),
     path:
-      provider === "claude"
+      provider === "claude-code" || provider === "claude-desktop"
         ? claudeProjectsRoot()
         : provider === "cursor"
           ? cursorLogsRoot()
@@ -1263,10 +1526,10 @@ function aggregateSessionActivity(
   sessions: CodexActivitySession[],
   labels: SettingsCopy,
   provider: AgentActivityProvider,
-  source: "codex-session" | "claude-session" | "cursor-session"
+  source: "codex-session" | "claude-code-session" | "claude-desktop-session" | "cursor-session"
 ): CodexActivity {
   const path =
-    provider === "claude"
+    provider === "claude-code" || provider === "claude-desktop"
       ? claudeProjectsRoot()
       : provider === "cursor"
         ? cursorLogsRoot()
@@ -1441,6 +1704,13 @@ function latestClaudeContentBlock(
 }
 
 function stateForClaudeSessionEvent(event: ClaudeSessionEvent): CodexActivityState | null {
+  if (event.type === "bridge-session") return "working";
+  if (event.type === "started") return "working";
+  if (event.type === "result") {
+    const status = event.result?.status?.toLowerCase();
+    return status === "fail" || status === "failed" || status === "error" ? "error" : "complete";
+  }
+  if (event.type === "last-prompt" && compactCodexText(event.lastPrompt ?? null)) return "working";
   if (event.type === "assistant") {
     const blocks = claudeContentBlocks(event);
     if (blocks.some((block) => block.type === "tool_use")) return "working";
@@ -1461,6 +1731,15 @@ function messageForClaudeSessionEvent(
   events: ClaudeSessionEvent[],
   eventIndex: number
 ): string | null {
+  if (event.type === "bridge-session") return labels.codexWorkingMessage;
+  if (event.type === "started") return labels.codexWorkingMessage;
+  if (event.type === "result") {
+    const status = event.result?.status?.toLowerCase();
+    if (status === "fail" || status === "failed" || status === "error") return labels.codexBlocked;
+    return labels.codexWaitingForNextPrompt;
+  }
+  if (event.type === "last-prompt" && compactCodexText(event.lastPrompt ?? null)) return labels.codexReadingPrompt;
+
   if (event.type === "assistant") {
     const toolUse = latestClaudeContentBlock(claudeContentBlocks(event), (block) => block.type === "tool_use");
     if (toolUse) return messageForCodexToolActivity(classifyClaudeToolUse(toolUse), labels, true);
@@ -1483,7 +1762,10 @@ function messageForClaudeSessionEvent(
 function titleForClaudeSession(events: ClaudeSessionEvent[], filePath: string): string {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
-    const title = compactCodexText(firstString([event.title, event.summary, event.name, event.lastPrompt]), 42);
+    const title = compactCodexText(
+      firstString([event.title, event.aiTitle, event.customTitle, event.summary, event.name, event.lastPrompt]),
+      42
+    );
     if (title) return title;
   }
   for (let index = 0; index < events.length; index += 1) {
@@ -1492,6 +1774,37 @@ function titleForClaudeSession(events: ClaudeSessionEvent[], filePath: string): 
     if (title) return title;
   }
   return basename(filePath, extname(filePath));
+}
+
+type ClaudeActivityProvider = Extract<AgentActivityProvider, "claude-code" | "claude-desktop">;
+
+function idForClaudeSession(events: ClaudeSessionEvent[], filePath: string): string {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const sessionId = events[index].sessionId;
+    if (sessionId) return sessionId;
+  }
+  const parentSessionId = filePath.match(/\/([0-9a-f-]{36})\/subagents\//i)?.[1];
+  return parentSessionId ?? basename(filePath, extname(filePath));
+}
+
+function coalesceClaudeSessions(sessions: CodexActivitySession[]): CodexActivitySession[] {
+  const byId = new Map<string, CodexActivitySession>();
+  for (const session of sessions) {
+    const existing = byId.get(session.id);
+    if (!existing || session.updatedAt >= existing.updatedAt) {
+      byId.set(session.id, session);
+    }
+  }
+  return Array.from(byId.values());
+}
+
+function isClaudeDesktopSession(events: ClaudeSessionEvent[]): boolean {
+  return events.some((event) => event.entrypoint?.toLowerCase() === "claude-desktop");
+}
+
+function claudeSessionMatchesProvider(events: ClaudeSessionEvent[], provider: ClaudeActivityProvider): boolean {
+  const desktopSession = isClaudeDesktopSession(events);
+  return provider === "claude-desktop" ? desktopSession : !desktopSession;
 }
 
 async function readClaudeCodeSessionTitles(sessionIds: Set<string>): Promise<Map<string, string>> {
@@ -1522,16 +1835,20 @@ async function readClaudeCodeSessionTitles(sessionIds: Set<string>): Promise<Map
   return new Map(Array.from(titles, ([sessionId, value]) => [sessionId, value.title]));
 }
 
-async function inferClaudeSessionFileActivity(file: {
-  path: string;
-  mtimeMs: number;
-}): Promise<CodexActivitySession | null> {
+async function inferClaudeSessionFileActivity(
+  file: {
+    path: string;
+    mtimeMs: number;
+  },
+  provider: ClaudeActivityProvider
+): Promise<CodexActivitySession | null> {
   const labels = text().settings;
   const [head, tail] = await Promise.all([
     readFileHead(file.path, 64 * 1024),
     readFileTail(file.path, CODEX_SESSION_TAIL_BYTES)
   ]);
   const events = parseClaudeSessionEvents(`${head}\n${tail}`);
+  if (!claudeSessionMatchesProvider(events, provider)) return null;
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
@@ -1542,7 +1859,7 @@ async function inferClaudeSessionFileActivity(file: {
     if (!Number.isFinite(updatedAt)) return null;
     if (Date.now() - updatedAt > codexActivityFreshMs(state)) return null;
 
-    const id = event.sessionId ?? basename(file.path, extname(file.path));
+    const id = idForClaudeSession(events, file.path);
     return {
       id,
       title: titleForClaudeSession(events, file.path),
@@ -1556,7 +1873,7 @@ async function inferClaudeSessionFileActivity(file: {
   return null;
 }
 
-async function inferClaudeSessionActivity(): Promise<CodexActivity | null> {
+async function inferClaudeSessionActivity(provider: ClaudeActivityProvider): Promise<CodexActivity | null> {
   const freshMs = agentActivityFreshMs();
   const files = (await findCodexSessionFiles(claudeProjectsRoot()))
     .filter((file) => Date.now() - file.mtimeMs <= freshMs)
@@ -1564,15 +1881,24 @@ async function inferClaudeSessionActivity(): Promise<CodexActivity | null> {
     .slice(0, 50);
   if (!files.length) return null;
 
-  const sessions = (await Promise.all(files.map(inferClaudeSessionFileActivity)))
-    .filter((session): session is CodexActivitySession => Boolean(session));
+  const sessions = coalesceClaudeSessions(
+    (await Promise.all(files.map((file) => inferClaudeSessionFileActivity(file, provider))))
+      .filter((session): session is CodexActivitySession => Boolean(session))
+  );
   if (!sessions.length) return null;
-  const titles = await readClaudeCodeSessionTitles(new Set(sessions.map((session) => session.id)));
+  const titles = provider === "claude-code"
+    ? await readClaudeCodeSessionTitles(new Set(sessions.map((session) => session.id)))
+    : new Map<string, string>();
   const titledSessions = sessions.map((session) => ({
     ...session,
     title: titles.get(session.id) ?? session.title
   }));
-  return aggregateSessionActivity(titledSessions, text().settings, "claude", "claude-session");
+  return aggregateSessionActivity(
+    titledSessions,
+    text().settings,
+    provider,
+    provider === "claude-code" ? "claude-code-session" : "claude-desktop-session"
+  );
 }
 
 type CursorComposerHeader = {
@@ -1757,7 +2083,10 @@ async function pollAgentActivity(provider: AgentActivityProvider): Promise<void>
       inferCodexSessionActivity()
     ]);
   } else {
-    inferred = provider === "claude" ? await inferClaudeSessionActivity() : await inferCursorSessionActivity();
+    inferred =
+      provider === "claude-code" || provider === "claude-desktop"
+        ? await inferClaudeSessionActivity(provider)
+        : await inferCursorSessionActivity();
   }
 
   if (
@@ -1788,7 +2117,7 @@ async function pollAgentActivity(provider: AgentActivityProvider): Promise<void>
 async function pollCodexActivity(): Promise<void> {
   const providers = activeAgentProviders();
   await Promise.all(
-    (["codex", "claude", "cursor"] as const).map(async (provider) => {
+    (["codex", "claude-code", "claude-desktop", "cursor"] as const).map(async (provider) => {
       if (!providers.includes(provider)) {
         setAgentActivity(provider, emptyAgentActivity(provider));
         return;
@@ -2896,13 +3225,21 @@ async function openCodexSession(sessionId: string): Promise<void> {
   });
 }
 
-async function openClaudeSession(sessionId: string): Promise<void> {
+async function openClaudeCodeSession(sessionId: string, sessionTitle?: string): Promise<void> {
   const cliSessionId = sessionId.trim();
   if (!CODEX_THREAD_ID_PATTERN.test(cliSessionId)) return;
-  const resumeUrl = `claude://resume?session=${encodeURIComponent(cliSessionId)}&pawpal=${Date.now()}`;
-  await openDesktopDeepLink(resumeUrl, {
+  const titleCandidates = claudeCodeOpenTitleCandidates(cliSessionId, sessionTitle);
+  if (await raiseClaudeCodeTerminalWindow(titleCandidates)) return;
+  if (await openInstalledClaudeCodeTerminal()) return;
+  console.error("No Claude Code terminal window or terminal app found for session:", cliSessionId);
+}
+
+async function openClaudeDesktopSession(sessionId: string): Promise<void> {
+  const desktopSessionId = sessionId.trim();
+  if (!CODEX_THREAD_ID_PATTERN.test(desktopSessionId)) return;
+  await openDesktopDeepLink(`claude://resume?session=${desktopSessionId}`, {
     bundleId: CLAUDE_DESKTOP_BUNDLE_ID,
-    label: "Claude"
+    label: "Claude Desktop"
   });
 }
 
@@ -2914,10 +3251,14 @@ async function openCursorSession(): Promise<void> {
   await shell.openExternal("cursor://");
 }
 
-async function openAgentSession(sessionId: string, provider?: AgentActivityProvider): Promise<void> {
+async function openAgentSession(sessionId: string, provider?: AgentActivityProvider, sessionTitle?: string): Promise<void> {
   try {
-    if (provider === "claude") {
-      await openClaudeSession(sessionId);
+    if (provider === "claude-code") {
+      await openClaudeCodeSession(sessionId, sessionTitle);
+      return;
+    }
+    if (provider === "claude-desktop") {
+      await openClaudeDesktopSession(sessionId);
       return;
     }
     if (provider === "codex") {
@@ -3208,6 +3549,12 @@ function registerIpc(): void {
   ipcMain.handle("custom-pet:import-asset", (_event, state: PetState, sourcePath: string) =>
     importCustomPetAsset(state, sourcePath)
   );
+  ipcMain.handle("custom-pet:create-generation-job", (_event, input: CreateCustomPetGenerationInput) =>
+    createCustomPetGenerationJob(input)
+  );
+  ipcMain.handle("custom-pet:complete-generation-job", (_event, input: CompleteCustomPetGenerationInput) =>
+    completeCustomPetGenerationJob(input)
+  );
   ipcMain.on("app:open-release-notes", openReleaseNotes);
   ipcMain.on("pet:clicked", (event) => {
     if (petSlotForWebContents(event.sender) !== "primary") return;
@@ -3221,8 +3568,8 @@ function registerIpc(): void {
   ipcMain.on("pet:drag-stop", (event) => stopPetDrag(petSlotForWebContents(event.sender)));
   ipcMain.on("pet:resize-start", (event) => startPetResize(petSlotForWebContents(event.sender)));
   ipcMain.on("pet:resize-stop", stopPetResize);
-  ipcMain.on("agent:open-session", (_event, sessionId: string, provider?: AgentActivityProvider) =>
-    openAgentSession(sessionId, provider)
+  ipcMain.on("agent:open-session", (_event, sessionId: string, provider?: AgentActivityProvider, title?: string) =>
+    openAgentSession(sessionId, provider, title)
   );
   ipcMain.on("codex:open-session", (_event, sessionId: string) => openAgentSession(sessionId, "codex"));
   ipcMain.on("app:open-settings", createSettingsWindow);
@@ -3245,7 +3592,7 @@ protocol.registerSchemesAsPrivileged([
   { scheme: "pawpal-asset", privileges: { bypassCSP: true, supportFetchAPI: true } }
 ]);
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   protocol.handle("pawpal-asset", (request) => {
     let relativePath = "";
     try {
@@ -3258,21 +3605,26 @@ app.whenReady().then(() => {
     const appBase = app.isPackaged ? process.resourcesPath : process.cwd();
     const builtInAssetRoot = resolve(appBase, "pet_assets");
     const customAssetRoot = resolve(app.getPath("userData"), "custom_pet_assets");
-    const assetPath = relativePath.startsWith("custom_pet_assets/")
+    const customPetsRoot = resolve(app.getPath("userData"), "custom_pets");
+    const assetPath = relativePath.startsWith("custom_pet_assets/") || relativePath.startsWith("custom_pets/")
       ? resolve(app.getPath("userData"), relativePath)
       : resolve(appBase, relativePath);
     const isInsideBuiltInAssetRoot =
       assetPath === builtInAssetRoot || assetPath.startsWith(`${builtInAssetRoot}${sep}`);
     const isInsideCustomAssetRoot =
       assetPath === customAssetRoot || assetPath.startsWith(`${customAssetRoot}${sep}`);
+    const isInsideCustomPetsRoot =
+      assetPath === customPetsRoot || assetPath.startsWith(`${customPetsRoot}${sep}`);
 
-    if (!isInsideBuiltInAssetRoot && !isInsideCustomAssetRoot) {
+    if (!isInsideBuiltInAssetRoot && !isInsideCustomAssetRoot && !isInsideCustomPetsRoot) {
       return new Response("Asset not found", { status: 404 });
     }
 
     return net.fetch(pathToFileURL(assetPath).href);
   });
 
+  customPetStore = createCustomPetStore(app.getPath("userData"));
+  customPetLibrary = await customPetStore.loadIndex();
   getStats();
   registerIpc();
   createPetWindow();

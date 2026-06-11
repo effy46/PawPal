@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { DEFAULT_SETTINGS } from "../src/shared/constants";
+import { PET_STATE_ORDER } from "../src/shared/petAppearances";
 import { normalizeSettings } from "../src/main/settingsStore";
 
 export const tests = [
@@ -68,8 +69,14 @@ export const tests = [
   {
     name: "normalizeSettings defaults agent source from pet appearance",
     run(): void {
-      assert.equal(normalizeSettings({ petAppearanceId: "xiaoJiMao" }).primaryAgentSource, "claude");
+      assert.equal(normalizeSettings({ petAppearanceId: "xiaoJiMao" }).primaryAgentSource, "claude-code");
       assert.equal(normalizeSettings({ petAppearanceId: "lovartPuppy" }).primaryAgentSource, "none");
+    }
+  },
+  {
+    name: "normalizeSettings migrates legacy Claude source to Claude Code",
+    run(): void {
+      assert.equal(normalizeSettings({ primaryAgentSource: "claude" as never }).primaryAgentSource, "claude-code");
     }
   },
   {
@@ -103,13 +110,16 @@ export const tests = [
         petAppearanceId: "custom",
         customPetAppearance: {
           name: "My Pet",
-          assets: {
-            idle: {
-              relativePath: "custom_pet_assets/idle/my-pet.gif",
-              originalName: "my-pet.gif",
-              updatedAt: 1
-            }
-          }
+          assets: Object.fromEntries(
+            PET_STATE_ORDER.map((state) => [
+              state,
+              {
+                relativePath: `custom_pet_assets/${state}/my-pet.gif`,
+                originalName: "my-pet.gif",
+                updatedAt: 1
+              }
+            ])
+          )
         }
       });
 

@@ -32,10 +32,10 @@ PawPal is a desktop pet app for macOS and Windows. A transparent, always-on-top 
 - **Hydration reminders** — gentle prompts to drink water
 - **Focus mode** — detects your active app; if you drift into social media, the dog nudges you back to work
 - **Zoom meeting reminders** — paste an Outlook ICS calendar link in Settings, then PawPal reminds you before Zoom meetings and gives you a Join button
-- **Agent activity** — each pet can watch Codex, Claude Code, Cursor, or no agent. PawPal summarizes active chats, file reads, searches, edits, tool calls, and web searches in the same thought-bubble UI; double-click a task bubble to jump back to the matching agent when supported
+- **Agent activity** — each pet can watch Codex, Claude Code, Claude Desktop, Cursor, or no agent. PawPal summarizes active chats, file reads, searches, edits, tool calls, and web searches in the same thought-bubble UI; double-click a task bubble to jump back to the matching agent when supported
 - **Dual Agent Mode** — show two desktop pets at once for dual-screen workflows, with separate pet appearance and agent source per slot; the primary pet keeps break, hydration, and focus reminders
 - **Resizable desktop pet** — hover the lower-right corner of the pet window to reveal a resize handle, then drag to make PawPal bigger or smaller
-- **Multiple pet styles** — includes White Line Dog, Xiao Ji Mao, Golden Puppy, Hachi, and custom GIF uploads for each pet state
+- **Multiple pet styles** — includes Hachi, Xiao Ji Mao, White Line Dog, and custom GIF uploads for each pet state
 - **Settings dashboard** — tracks today's breaks, waters, focus minutes, and distraction warnings, with runtime diagnostics for agent activity and focus detection
 - **Monthly journal** — a journal-style monthly calendar stamps daily water and break goal progress; hover a week to inspect that week's check-ins
 - **System controls** — launch-at-login, manual or startup update checks, configurable reminder timing, task bubble retention, blocked apps, and blocked keywords
@@ -63,7 +63,7 @@ If you cannot see Shared calendars or Publish calendar, your workplace probably 
 - Monthly journal adds journal-style water and break stamps, with weekly hover details
 - Zoom meeting reminders can read an Outlook ICS URL and show a Join button
 - Dual Agent Mode adds a second desktop pet for agent-status workflows
-- Agent activity now supports Codex, Claude Code, and Cursor, with chat jump-back where supported
+- Agent activity now supports Codex, Claude Code, Claude Desktop, and Cursor, with chat jump-back where supported
 - Multiple active task bubbles can be expanded and browsed with controls or the mouse wheel
 - Hachi is now available as a built-in pet appearance
 - Release builds now include macOS installers and a Windows `.exe` installer
@@ -149,15 +149,15 @@ Release builds are produced by GitHub Actions on native runners: macOS artifacts
 
 ### Agent Activity Bridge
 
-PawPal can reflect live coding-agent work directly in the pet UI. Agent source is explicit: a pet can watch Codex, Claude Code, Cursor, or no agent. Defaults are White Line Dog for Codex and Xiao Ji Mao for Claude Code. When an agent is active, the pet shows a compact status badge; hover it for a manga-style thought bubble with the current chat summary.
+PawPal can reflect live coding-agent work directly in the pet UI. Agent source is explicit: a pet can watch Codex, Claude Code, Claude Desktop, Cursor, or no agent. Defaults are White Line Dog for Codex and Xiao Ji Mao for Claude Code. When an agent is active, the pet shows a compact status badge; hover it for a manga-style thought bubble with the current chat summary.
 
-If several chats are active, PawPal groups them behind a count badge that can expand into separate chat cards and be browsed with controls or the mouse wheel. Agent bubbles and chat cards can open the matching Codex or Claude Code chat; Cursor bubbles open Cursor because Cursor does not expose the same stable chat deep link. You can adjust how long task bubbles stay visible in Settings -> System with Task Bubble Retention. Break, hydration, and focus reminders still take priority, so health nudges never get buried behind coding status.
+If several chats are active, PawPal groups them behind a count badge that can expand into separate chat cards and be browsed with controls or the mouse wheel. Agent bubbles and chat cards can open the matching Codex chat, raise the running Claude Code terminal window when possible, open the matching Claude Desktop session, or open Cursor. You can adjust how long task bubbles stay visible in Settings -> System with Task Bubble Retention. Break, hydration, and focus reminders still take priority, so health nudges never get buried behind coding status.
 
 ### Dual Agent Mode Design
 
 Dual Agent Mode lets PawPal show two desktop pets at once for dual-screen workflows. Each pet slot has its own pet appearance, agent source, and health-reminder ownership. Defaults are Slot A = White Line Dog + Codex + health reminders on, and Slot B = Xiao Ji Mao + Claude Code + health reminders off.
 
-Agent source is explicit in both single-pet and dual-pet modes, with options for Codex, Claude Code, Cursor, or none. When both dual slots are enabled, the two slots must watch different agent sources. Slot B is agent-status-only by default: draggable, task bubbles, and double-click chat jump are enabled where the agent supports it, but break, hydration, focus reminders, settings, and dashboard controls stay with the primary health pet.
+Agent source is explicit in both single-pet and dual-pet modes, with options for Codex, Claude Code, Claude Desktop, Cursor, or none. When both dual slots are enabled, the two slots must watch different agent sources. Slot B is agent-status-only by default: draggable, task bubbles, and double-click chat jump are enabled where the agent supports it, but break, hydration, focus reminders, settings, and dashboard controls stay with the primary health pet.
 
 ### Tech Stack
 
@@ -203,7 +203,7 @@ PawPal 是一款支持 macOS 和 Windows 的桌面宠物应用。一只透明、
 - **喝水提醒** — 温和提醒你补充水分
 - **专注模式** — 识别当前正在使用的应用；切到社交媒体或其它分心页面时，小狗会提醒你回到工作
 - **Zoom 会议提醒** — 在设置里粘贴 Outlook 的 ICS 日历链接后，PawPal 会在 Zoom 会议开始前提醒你，并提供加入按钮
-- **Agent 状态** — 每只宠物都可以选择跟踪 Codex、Claude Code、Cursor，或只当普通桌宠；任务泡泡会显示当前聊天、读文件、搜索、改文件、调用工具和网页搜索，支持时可双击跳回对应 Agent
+- **Agent 状态** — 每只宠物都可以选择跟踪 Codex、Claude Code、Claude Desktop、Cursor，或只当普通桌宠；任务泡泡会显示当前聊天、读文件、搜索、改文件、调用工具和网页搜索，支持时可双击跳回对应 Agent
 - **双桌宠 Agent 模式** — 可同时显示两只桌宠，适合双屏使用；每只宠物都能单独设置外观和跟踪对象，主要宠物继续负责休息、喝水和专注提醒
 - **桌宠大小调整** — 鼠标移到宠物窗口右下角会出现调整手柄，拖动即可放大或缩小 PawPal
 - **多种宠物外观** — 包含白色线条小狗、小鸡毛、金毛幼犬、小八，也支持为每个状态上传自定义 GIF
@@ -234,7 +234,7 @@ PawPal 可以通过 Outlook 的 ICS 日历链接提醒 Zoom 会议，不需要�
 - 新增月度手帐统计，用水瓶和小狗盖章记录喝水、休息目标完成情况，并支持悬停查看每周明细
 - 新增 Zoom 会议提醒，可读取 Outlook ICS 链接并显示加入按钮
 - 新增双桌宠 Agent 模式，可用第二只桌宠查看 Agent 状态
-- Agent 状态支持 Codex、Claude Code 和 Cursor，支持时可跳回对应聊天
+- Agent 状态支持 Codex、Claude Code、Claude Desktop 和 Cursor，支持时可跳回对应聊天
 - 多个活跃任务泡泡可展开，并用按钮或鼠标滚轮浏览
 - 小八已加入内置宠物外观
 - Release 已包含 macOS 安装包和 Windows `.exe` 安装包
@@ -320,15 +320,15 @@ pnpm dist:win     # 仅打包 Windows；在 macOS 上可能需要 Wine
 
 ### Agent 状态联动
 
-PawPal 可以把 coding agent 的工作状态直接显示在桌宠 UI 里。每只宠物都可以选择跟踪 Codex、Claude Code、Cursor，或不跟踪 Agent。默认配置是白色线条小狗跟踪 Codex，小鸡毛跟踪 Claude Code。Agent 活跃时，桌宠会显示一个简洁的状态徽标；鼠标悬停可用漫画风思考泡泡查看当前聊天摘要。
+PawPal 可以把 coding agent 的工作状态直接显示在桌宠 UI 里。每只宠物都可以选择跟踪 Codex、Claude Code、Claude Desktop、Cursor，或不跟踪 Agent。默认配置是白色线条小狗跟踪 Codex，小鸡毛跟踪 Claude Code。Agent 活跃时，桌宠会显示一个简洁的状态徽标；鼠标悬停可用漫画风思考泡泡查看当前聊天摘要。
 
-如果多个聊天同时活跃，PawPal 会先显示数量徽标，点击后展开为独立聊天卡片，并可用按钮或鼠标滚轮浏览。双击 Agent 泡泡或聊天卡片，可以跳回对应的 Codex / Claude Code 对话；Cursor 目前会打开 Cursor 应用。你也可以在“设置 -> 系统”里调整任务泡泡保留时间。休息、喝水和专注提醒仍然优先显示，不会被 Agent 状态挡住。
+如果多个聊天同时活跃，PawPal 会先显示数量徽标，点击后展开为独立聊天卡片，并可用按钮或鼠标滚轮浏览。双击 Agent 泡泡或聊天卡片，可以跳回对应的 Codex 对话；Claude Code 会优先唤起正在运行的终端窗口；Claude Desktop 会打开对应桌面会话；Cursor 会打开 Cursor 应用。你也可以在“设置 -> 系统”里调整任务泡泡保留时间。休息、喝水和专注提醒仍然优先显示，不会被 Agent 状态挡住。
 
 ### 双桌宠 Agent 模式
 
 双桌宠 Agent 模式可以同时显示两只桌宠，适合双屏使用。每只宠物都可以单独选择外观和跟踪对象。默认配置是：白色线条小狗跟踪 Codex，并负责休息、喝水和专注提醒；小鸡毛跟踪 Claude Code，只显示 Agent 状态。
 
-单桌宠和双桌宠模式都会使用同一套跟踪对象设置，可选 Codex、Claude Code、Cursor 或不跟踪 Agent。双桌宠模式开启时，两只宠物不能跟踪同一个 Agent，避免重复显示。第二只宠物默认只负责 Agent 状态：可以拖动、显示任务泡泡、双击跳转聊天；休息、喝水、专注提醒、设置和仪表盘仍由主要宠物负责。
+单桌宠和双桌宠模式都会使用同一套跟踪对象设置，可选 Codex、Claude Code、Claude Desktop、Cursor 或不跟踪 Agent。双桌宠模式开启时，两只宠物不能跟踪同一个 Agent，避免重复显示。第二只宠物默认只负责 Agent 状态：可以拖动、显示任务泡泡、双击跳转聊天；休息、喝水、专注提醒、设置和仪表盘仍由主要宠物负责。
 
 ### 技术栈
 

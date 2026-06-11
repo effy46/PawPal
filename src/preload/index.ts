@@ -2,6 +2,10 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   AppSnapshot,
   AgentActivityProvider,
+  CompleteCustomPetGenerationInput,
+  CompleteCustomPetGenerationResult,
+  CreateCustomPetGenerationInput,
+  CreatedCustomPetGenerationJob,
   CustomPetAsset,
   DemoTrigger,
   PetState,
@@ -27,6 +31,14 @@ const api = {
     ipcRenderer.invoke("custom-pet:select-asset", state),
   importCustomPetAsset: (state: PetState, sourcePath: string): Promise<CustomPetAsset | null> =>
     ipcRenderer.invoke("custom-pet:import-asset", state, sourcePath),
+  createCustomPetGenerationJob: (
+    input: CreateCustomPetGenerationInput
+  ): Promise<CreatedCustomPetGenerationJob | null> =>
+    ipcRenderer.invoke("custom-pet:create-generation-job", input),
+  completeCustomPetGenerationJob: (
+    input: CompleteCustomPetGenerationInput
+  ): Promise<CompleteCustomPetGenerationResult> =>
+    ipcRenderer.invoke("custom-pet:complete-generation-job", input),
   pathForFile: (file: File): string => webUtils.getPathForFile(file),
   petClicked: (): void => ipcRenderer.send("pet:clicked"),
   petContextMenu: (): void => ipcRenderer.send("pet:context-menu"),
@@ -38,8 +50,8 @@ const api = {
   petDragStop: (): void => ipcRenderer.send("pet:drag-stop"),
   petResizeStart: (): void => ipcRenderer.send("pet:resize-start"),
   petResizeStop: (): void => ipcRenderer.send("pet:resize-stop"),
-  openAgentSession: (sessionId: string, provider?: AgentActivityProvider): void =>
-    ipcRenderer.send("agent:open-session", sessionId, provider),
+  openAgentSession: (sessionId: string, provider?: AgentActivityProvider, title?: string): void =>
+    ipcRenderer.send("agent:open-session", sessionId, provider, title),
   openCodexSession: (sessionId: string): void => ipcRenderer.send("agent:open-session", sessionId, "codex"),
   setMouseInteractive: (interactive: boolean): void =>
     ipcRenderer.send("pet:set-mouse-interactive", interactive),

@@ -3,6 +3,7 @@ import type { DragEvent, JSX, ReactNode } from "react";
 import { i18n, LANGUAGE_OPTIONS, resolveLanguage } from "../../../shared/i18n";
 import {
   hasRequiredCustomPetAssets,
+  isCustomPetAppearanceId,
   PET_STATE_ORDER,
   petAppearanceOptions,
   REQUIRED_CUSTOM_PET_STATES,
@@ -13,8 +14,13 @@ import type {
   AgentActivitySource,
   BuiltInPetAppearanceId,
   CodexActivityState,
+  CompleteCustomPetGenerationResult,
+  CreatedCustomPetGenerationJob,
   CustomPetAppearance,
+  CustomPetAppearanceId,
   CustomPetAsset,
+  CustomPetLibrary,
+  CustomPetManifest,
   DemoTrigger,
   Language,
   PetAppearanceId,
@@ -25,6 +31,7 @@ import type {
   UpdateCheckResult
 } from "../../../shared/types";
 import { getPetAsset } from "../assets";
+import type { PetAssetSource } from "../assets";
 import { distractionHelp, formatDistractionState, formatTimer, formatTimestamp, localeFor } from "../format";
 import { useNow, useSnapshot } from "../hooks";
 import monthlyJournalPaper from "../media/monthly-journal-paper.png";
@@ -39,7 +46,7 @@ import waterRedStamp from "../media/stamps/water-red.png";
 import waterYellowStamp from "../media/stamps/water-yellow.png";
 
 type SettingsCopy = ReturnType<typeof i18n>["settings"];
-const CUSTOM_PET_STATE_ORDER = PET_STATE_ORDER.filter((state) => state !== "quitRunning");
+const CUSTOM_PET_STATE_ORDER = PET_STATE_ORDER;
 
 function Row({
   label,
@@ -225,10 +232,15 @@ function formatCodexActivityState(state: CodexActivityState, labels: SettingsCop
 function agentSourceOptions(labels: SettingsCopy): Array<{ value: AgentActivitySource; label: string }> {
   return [
     { value: "codex", label: labels.codex },
-    { value: "claude", label: labels.claudeCode },
+    { value: "claude-code", label: labels.claudeCode },
+    { value: "claude-desktop", label: labels.claudeDesktop },
     { value: "cursor", label: labels.cursor },
     { value: "none", label: labels.agentSourceNone }
   ];
+}
+
+function alternateAgentSource(source: AgentActivitySource): AgentActivitySource {
+  return source === "codex" ? "claude-code" : "codex";
 }
 
 type JournalTone = "red" | "yellow" | "green";
@@ -468,14 +480,34 @@ function agentSourceSelectOptions(
 function petSelectOptions(
   language: Settings["language"],
   labels: SettingsCopy,
-  customPetReady: boolean
+  customPetReady: boolean,
+  completeCustomPets: CustomPetManifest[]
 ): Array<{ value: string; label: string }> {
   const options: Array<{ value: string; label: string }> = petAppearanceOptions(language).map((option) => ({
     value: option.value,
     label: option.label
   }));
+  options.push(
+    ...completeCustomPets.map((manifest) => ({
+      value: customPetAppearanceId(manifest),
+      label: manifest.name
+    }))
+  );
   if (customPetReady) options.push({ value: "custom", label: labels.customPet });
   return options;
+}
+
+function customPetAppearanceId(manifest: CustomPetManifest): CustomPetAppearanceId {
+  return `custom:${manifest.id}`;
+}
+
+function completeCustomPetManifests(library: CustomPetLibrary): CustomPetManifest[] {
+  return Object.values(library.manifests)
+    .filter((manifest) =>
+      manifest.status === "complete" &&
+      REQUIRED_CUSTOM_PET_STATES.every((state) => manifest.assets[state])
+    )
+    .sort((left, right) => left.createdAt - right.createdAt || left.name.localeCompare(right.name));
 }
 
 function ChipsControl({
@@ -617,6 +649,16 @@ function customPetAssetPreviewSrc(asset: CustomPetAsset): string {
   return new URL(window.pawpal.assetUrl(asset.relativePath)).href;
 }
 
+function customPetJobSummaries(library: CustomPetLibrary): NonNullable<CustomPetLibrary["jobs"]>[string][] {
+  return Object.values(library.jobs ?? {}).sort((left, right) => right.updatedAt - left.updatedAt);
+}
+
+function formatCustomPetGenerationStatus(status: string): string {
+  if (status === "queued") return "waiting for GIFs";
+  if (status === "needs_input") return "waiting for GIFs";
+  return status.replace(/_/g, " ");
+}
+
 export function SettingsView(): JSX.Element {
   const snapshot = useSnapshot();
   const { settings, stats, updateCheck } = snapshot;
@@ -624,11 +666,32 @@ export function SettingsView(): JSX.Element {
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [customEditorOpen, setCustomEditorOpen] = useState(settings.petAppearanceId === "custom");
+  const [customGenerationName, setCustomGenerationName] = useState("");
+  const [customGenerationPrompt, setCustomGenerationPrompt] = useState("");
+  const [customGenerationBusy, setCustomGenerationBusy] = useState(false);
+  const [customGenerationCompletingPetId, setCustomGenerationCompletingPetId] = useState<string | null>(null);
+  const [customGenerationResult, setCustomGenerationResult] = useState<CreatedCustomPetGenerationJob | null>(null);
+  const [customGenerationCheckMessage, setCustomGenerationCheckMessage] = useState<string | null>(null);
+  const [customGenerationPromptCopied, setCustomGenerationPromptCopied] = useState(false);
   const now = useNow();
   const savedSettingsKey = JSON.stringify(settings);
   const language = resolveLanguage(draft.language);
   const labels = i18n(language).settings;
   const customPetReady = hasRequiredCustomPetAssets(draft.customPetAppearance);
+  const completeCustomPets = useMemo(
+    () => completeCustomPetManifests(snapshot.customPetLibrary),
+    [snapshot.customPetLibrary]
+  );
+  const generationJobs = useMemo(
+    () => customPetJobSummaries(snapshot.customPetLibrary),
+    [snapshot.customPetLibrary]
+  );
+  const draftCustomAssetSource =
+    draft.petAppearanceId === "custom"
+      ? draft.customPetAppearance
+      : isCustomPetAppearanceId(draft.petAppearanceId)
+        ? snapshot.customPetLibrary
+        : undefined;
 
   const petAvatar = useMemo(
     () =>
@@ -637,9 +700,9 @@ export function SettingsView(): JSX.Element {
         "happy",
         0,
         0,
-        draft.customPetAppearance
+        draftCustomAssetSource
       ),
-    [draft.customPetAppearance, draft.petAppearanceId]
+    [draft.petAppearanceId, draftCustomAssetSource]
   );
 
   useEffect(() => {
@@ -671,9 +734,9 @@ export function SettingsView(): JSX.Element {
         next.primaryAgentSource === next.secondaryAgentSource
       ) {
         if (partial.primaryAgentSource) {
-          next.secondaryAgentSource = next.primaryAgentSource === "codex" ? "claude" : "codex";
+          next.secondaryAgentSource = alternateAgentSource(next.primaryAgentSource);
         } else {
-          next.primaryAgentSource = next.secondaryAgentSource === "codex" ? "claude" : "codex";
+          next.primaryAgentSource = alternateAgentSource(next.secondaryAgentSource);
         }
       }
       return next;
@@ -725,6 +788,42 @@ export function SettingsView(): JSX.Element {
           ? "lineDog"
           : draft.petAppearanceId
     });
+  }
+
+  async function createGenerationJob(): Promise<void> {
+    if (!customGenerationPrompt.trim() || customGenerationBusy) return;
+    setCustomGenerationBusy(true);
+    const job = await window.pawpal.createCustomPetGenerationJob({
+      displayName: customGenerationName,
+      prompt: customGenerationPrompt
+    });
+    setCustomGenerationBusy(false);
+    if (!job) return;
+    setCustomGenerationResult(job);
+    setCustomGenerationCheckMessage(null);
+    setCustomGenerationPromptCopied(false);
+    setCustomGenerationPrompt("");
+    if (!customGenerationName.trim()) setCustomGenerationName(job.displayName);
+  }
+
+  async function copyGenerationPrompt(): Promise<void> {
+    if (!customGenerationResult) return;
+    await navigator.clipboard.writeText(customGenerationResult.promptText);
+    setCustomGenerationPromptCopied(true);
+  }
+
+  async function completeGenerationJob(petId: string): Promise<void> {
+    if (customGenerationCompletingPetId) return;
+    setCustomGenerationCompletingPetId(petId);
+    const result: CompleteCustomPetGenerationResult = await window.pawpal.completeCustomPetGenerationJob({ petId });
+    setCustomGenerationCompletingPetId(null);
+    if (!result.manifest) {
+      setCustomGenerationCheckMessage(result.errors.join(" ") || labels.customPetCheckFailed);
+      return;
+    }
+    setCustomGenerationCheckMessage(labels.customPetCheckPassed);
+    setCustomEditorOpen(false);
+    updateDraft({ petAppearanceId: customPetAppearanceId(result.manifest) });
   }
 
   return (
@@ -790,6 +889,7 @@ export function SettingsView(): JSX.Element {
                 selected={
                   !customEditorOpen &&
                   draft.petAppearanceId !== "custom" &&
+                  !isCustomPetAppearanceId(draft.petAppearanceId) &&
                   resolveBuiltInPetAppearanceId(draft.petAppearanceId) === option.value
                 }
                 onSelect={() => {
@@ -798,6 +898,22 @@ export function SettingsView(): JSX.Element {
                 }}
               />
             ))}
+            {completeCustomPets.map((manifest) => {
+              const customAppearanceId = customPetAppearanceId(manifest);
+              return (
+                <PetCard
+                  key={customAppearanceId}
+                  appearanceId={customAppearanceId}
+                  customAssetSource={snapshot.customPetLibrary}
+                  label={manifest.name}
+                  selected={!customEditorOpen && draft.petAppearanceId === customAppearanceId}
+                  onSelect={() => {
+                    setCustomEditorOpen(false);
+                    updateDraft({ petAppearanceId: customAppearanceId });
+                  }}
+                />
+              );
+            })}
             <PetCard
               label={labels.customPet}
               previewSrc={
@@ -813,16 +929,38 @@ export function SettingsView(): JSX.Element {
             />
           </div>
         </div>
-        {customEditorOpen ? (
+      </section>
+
+      {customEditorOpen ? (
+        <section className="prefs__group">
+          <h2 className="prefs__group-title">{labels.customPet}</h2>
           <CustomPetEditor
             customPetAppearance={draft.customPetAppearance}
             labels={labels}
             onDrop={uploadDroppedCustomPetAsset}
             onRemove={removeCustomPetAsset}
             onUpload={(state) => void uploadCustomPetAsset(state)}
+            generationPanel={
+              <CustomPetGenerationPanel
+                labels={labels}
+                name={customGenerationName}
+                prompt={customGenerationPrompt}
+                busy={customGenerationBusy}
+                completingPetId={customGenerationCompletingPetId}
+                  result={customGenerationResult}
+                  checkMessage={customGenerationCheckMessage}
+                  promptCopied={customGenerationPromptCopied}
+                  jobs={generationJobs}
+                  onNameChange={setCustomGenerationName}
+                  onPromptChange={setCustomGenerationPrompt}
+                  onCreate={createGenerationJob}
+                  onCopyPrompt={() => void copyGenerationPrompt()}
+                  onComplete={(petId) => void completeGenerationJob(petId)}
+                />
+            }
           />
-        ) : null}
-      </section>
+        </section>
+      ) : null}
 
       <section className="prefs__group">
         <h2 className="prefs__group-title">{labels.agentActivity}</h2>
@@ -860,7 +998,7 @@ export function SettingsView(): JSX.Element {
               control={
                 <SelectControl
                   value={draft.secondaryPetAppearanceId}
-                  options={petSelectOptions(language, labels, customPetReady)}
+                  options={petSelectOptions(language, labels, customPetReady, completeCustomPets)}
                   onChange={(value) =>
                     updateAgentDraft({ secondaryPetAppearanceId: value as PetAppearanceId })
                   }
@@ -1286,20 +1424,22 @@ function PetCard({
   appearanceId,
   label,
   previewSrc,
+  customAssetSource,
   selected,
   disabled = false,
   onSelect
 }: {
-  appearanceId?: BuiltInPetAppearanceId;
+  appearanceId?: BuiltInPetAppearanceId | CustomPetAppearanceId;
   label: string;
   previewSrc?: string;
+  customAssetSource?: PetAssetSource;
   selected: boolean;
   disabled?: boolean;
   onSelect: () => void;
 }): JSX.Element {
   const asset = useMemo(
-    () => (appearanceId ? getPetAsset(appearanceId, "idle") : null),
-    [appearanceId]
+    () => (appearanceId ? getPetAsset(appearanceId, "idle", 0, 0, customAssetSource) : null),
+    [appearanceId, customAssetSource]
   );
   return (
     <button
@@ -1321,16 +1461,20 @@ function PetCard({
 function CustomPetEditor({
   customPetAppearance,
   labels,
+  generationPanel,
   onDrop,
   onUpload,
   onRemove
 }: {
   customPetAppearance: CustomPetAppearance | null;
   labels: SettingsCopy;
+  generationPanel?: JSX.Element;
   onDrop: (state: PetState, file: File) => void;
   onUpload: (state: PetState) => void;
   onRemove: (state: PetState) => void;
 }): JSX.Element {
+  const [manualUploadOpen, setManualUploadOpen] = useState(false);
+
   function allowGifDrop(event: DragEvent<HTMLDivElement>): void {
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
@@ -1345,29 +1489,20 @@ function CustomPetEditor({
 
   return (
     <div className="custom-pet">
-      <div className="custom-pet__head">
-        <div className="custom-pet__title">
-          <span className="pref-block__label">{labels.customPetAssets}</span>
-          <span className="custom-pet__help">
-            <button
-              type="button"
-              className="custom-pet__help-button"
-              aria-label={labels.customPetRequirements}
-            >
-              ?
-            </button>
-            <span className="custom-pet__tooltip" role="tooltip">
-              {labels.customPetRequirements}
-            </span>
-          </span>
-        </div>
-        <span className="custom-pet__status">
-          {hasRequiredCustomPetAssets(customPetAppearance)
-            ? labels.customPetReady
-            : labels.customPetMissingRequired}
-        </span>
-      </div>
-      <div className="custom-pet__grid">
+      <Row
+        label={labels.customPetAssets}
+        hint={labels.customPetRequirements}
+        control={
+          <button
+            type="button"
+            className="pref-button is-primary custom-pet__upload-button"
+            onClick={() => setManualUploadOpen((open) => !open)}
+          >
+            {labels.uploadGif}
+          </button>
+        }
+      />
+      {manualUploadOpen ? <div className="custom-pet__grid">
         {CUSTOM_PET_STATE_ORDER.map((state) => {
           const reference = getPetAsset("lineDog", state);
           const customAsset = customPetAppearance?.assets[state] ?? null;
@@ -1426,6 +1561,122 @@ function CustomPetEditor({
             </div>
           );
         })}
+      </div> : null}
+      {generationPanel}
+    </div>
+  );
+}
+
+function CustomPetGenerationPanel({
+  labels,
+  name,
+  prompt,
+  busy,
+  completingPetId,
+  result,
+  checkMessage,
+  promptCopied,
+  jobs,
+  onNameChange,
+  onPromptChange,
+  onCreate,
+  onCopyPrompt,
+  onComplete
+}: {
+  labels: SettingsCopy;
+  name: string;
+  prompt: string;
+  busy: boolean;
+  completingPetId: string | null;
+  result: CreatedCustomPetGenerationJob | null;
+  checkMessage: string | null;
+  promptCopied: boolean;
+  jobs: NonNullable<CustomPetLibrary["jobs"]>[string][];
+  onNameChange: (value: string) => void;
+  onPromptChange: (value: string) => void;
+  onCreate: () => void;
+  onCopyPrompt: () => void;
+  onComplete: (petId: string) => void;
+}): JSX.Element {
+  return (
+    <div className="pref-row custom-pet-generation">
+      <div className="pref-row__label custom-pet-generation__label">
+        <div className="custom-pet__title">
+          <span>{labels.customPetGeneration}</span>
+          <span className="custom-pet__help">
+            <button
+              type="button"
+              className="custom-pet__help-button"
+              aria-label={labels.customPetGenerationHelp}
+            >
+              ?
+            </button>
+            <span className="custom-pet__tooltip" role="tooltip">
+              {labels.customPetGenerationHelp}
+            </span>
+          </span>
+        </div>
+      </div>
+      <div className="custom-pet-generation__body">
+        <div className="custom-pet-generation__status">
+          {jobs.length ? labels.customPetJobCount(jobs.length) : labels.customPetNoJobs}
+        </div>
+        <div className="custom-pet-generation__form">
+          <input
+            className="pref-text-input"
+            value={name}
+            placeholder={labels.customPetNamePlaceholder}
+            onChange={(event) => onNameChange(event.target.value)}
+          />
+          <textarea
+            className="pref-text-input custom-pet-generation__prompt"
+            value={prompt}
+            placeholder={labels.customPetPromptPlaceholder}
+            onChange={(event) => onPromptChange(event.target.value)}
+          />
+          <button
+            type="button"
+            className="pref-button is-primary custom-pet-generation__button"
+            disabled={busy || !prompt.trim()}
+            onClick={onCreate}
+          >
+            {busy ? labels.customPetCreating : labels.generateWithCodex}
+          </button>
+        </div>
+      {result ? (
+        <div className="custom-pet-generation__result">
+          <span>{labels.customPetCreated(result.petId)}</span>
+          <textarea
+            className="pref-text-input custom-pet-generation__cli"
+            readOnly
+            value={result.promptText}
+          />
+          <button type="button" className="pref-button" onClick={onCopyPrompt}>
+            {promptCopied ? labels.customPetPromptCopied : labels.customPetCopyPrompt}
+          </button>
+          </div>
+        ) : null}
+        {jobs.length ? (
+          <div className="custom-pet-generation__jobs">
+            {jobs.slice(0, 4).map((job) => (
+              <div className="custom-pet-generation__job" key={job.petId}>
+                <span>{job.petId}</span>
+              <strong>{labels.customPetStatus(formatCustomPetGenerationStatus(job.status))}</strong>
+                <button
+                  type="button"
+                  className="pref-button"
+                  disabled={Boolean(completingPetId)}
+                  onClick={() => onComplete(job.petId)}
+                >
+                  {completingPetId === job.petId ? labels.customPetValidating : labels.customPetValidate}
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {checkMessage ? (
+          <div className="custom-pet-generation__check-message">{checkMessage}</div>
+        ) : null}
       </div>
     </div>
   );

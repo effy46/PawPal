@@ -28,6 +28,11 @@ export function useSnapshot(): AppSnapshot {
     settings: DEFAULT_SETTINGS,
     stats: initialStats,
     statsHistory: {},
+    customPetLibrary: {
+      updatedAt: 0,
+      manifests: {},
+      jobs: {}
+    },
     timers: {
       breakDueAt: null,
       hydrationDueAt: null,

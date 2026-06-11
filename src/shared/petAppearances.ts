@@ -1,8 +1,12 @@
 import type {
   BuiltInPetAppearanceId,
   CustomPetAppearance,
+  CustomPetAppearanceId,
   CustomPetAsset,
+  CustomPetLibrary,
+  CustomPetManifest,
   Language,
+  LegacyCustomPetAppearanceId,
   PetAppearanceId,
   PetState
 } from "./types";
@@ -40,7 +44,7 @@ export const PET_STATE_ORDER: PetState[] = [
   "quitRunning"
 ];
 
-export const REQUIRED_CUSTOM_PET_STATES: PetState[] = ["idle"];
+export const REQUIRED_CUSTOM_PET_STATES: PetState[] = [...PET_STATE_ORDER];
 
 const goldenPuppy = (state: PetState, name: string): string =>
   `pet_assets/金毛 puppy/${state}/${name}`;
@@ -391,12 +395,21 @@ export const PET_APPEARANCES: Record<BuiltInPetAppearanceId, PetAppearanceManife
   }
 };
 
+export function isCustomPetAppearanceId(value: unknown): value is CustomPetAppearanceId {
+  return typeof value === "string" && /^custom:[A-Za-z0-9][A-Za-z0-9_-]*$/.test(value);
+}
+
+export function customPetIdFromAppearanceId(value: unknown): string | null {
+  return isCustomPetAppearanceId(value) ? value.slice("custom:".length) : null;
+}
+
 export function resolvePetAppearanceId(value: unknown): PetAppearanceId {
   if (
     value === "lineDog" ||
     value === "lovartPuppy" ||
     value === "xiaoJiMao" ||
     value === "hachi" ||
+    isCustomPetAppearanceId(value) ||
     value === "custom"
   ) {
     return value;
@@ -415,12 +428,16 @@ function isPetState(value: string): value is PetState {
   return PET_STATE_ORDER.includes(value as PetState);
 }
 
+function isCanonicalCustomPetAssetPath(path: string, petId: string, generationId: string, state: PetState): boolean {
+  return path === `custom_pets/${petId}/normalized/${generationId}/${state}.gif`;
+}
+
 function normalizeCustomAsset(value: unknown): CustomPetAsset | null {
   if (!value || typeof value !== "object") return null;
   const asset = value as Partial<CustomPetAsset>;
   if (
     typeof asset.relativePath !== "string" ||
-    !asset.relativePath.startsWith("custom_pet_assets/") ||
+    (!asset.relativePath.startsWith("custom_pet_assets/") && !asset.relativePath.startsWith("custom_pets/")) ||
     !asset.relativePath.toLowerCase().endsWith(".gif")
   ) {
     return null;
@@ -461,32 +478,79 @@ export function hasRequiredCustomPetAssets(custom: CustomPetAppearance | null | 
 }
 
 export function petAppearanceOptions(language: Language): Array<{ value: BuiltInPetAppearanceId; label: string }> {
-  return Object.values(PET_APPEARANCES).map((appearance) => ({
-    value: appearance.id,
-    label: appearance.label[language]
+  return (["lineDog", "xiaoJiMao", "hachi"] as const).map((id) => ({
+    value: id,
+    label: PET_APPEARANCES[id].label[language]
   }));
+}
+
+type CustomPetAssetSource = CustomPetAppearance | CustomPetManifest | CustomPetLibrary | null | undefined;
+
+function isCustomPetManifest(value: CustomPetAssetSource): value is CustomPetManifest {
+  return Boolean(
+    value &&
+      "id" in value &&
+      "status" in value &&
+      "generationId" in value &&
+      typeof value.id === "string" &&
+      typeof value.generationId === "string"
+  );
+}
+
+function findCustomPetManifest(source: CustomPetAssetSource, appearanceId: unknown): CustomPetManifest | null {
+  const petId = customPetIdFromAppearanceId(appearanceId);
+  if (!petId || !source) return null;
+  if (isCustomPetManifest(source)) return source.id === petId ? source : null;
+  if ("manifests" in source) return source.manifests[petId] ?? null;
+  return null;
+}
+
+function isCompleteCustomPetManifest(manifest: CustomPetManifest): boolean {
+  if (manifest.status !== "complete" || !hasRequiredCustomPetAssets(manifest)) return false;
+  return REQUIRED_CUSTOM_PET_STATES.every((state) => {
+    const asset = manifest.assets[state];
+    return Boolean(asset && isCanonicalCustomPetAssetPath(asset.relativePath, manifest.id, manifest.generationId, state));
+  });
 }
 
 export function getCustomPetAssetDefinition(
   custom: CustomPetAppearance | null | undefined,
   state: PetState
+): PetAssetDefinition | null;
+export function getCustomPetAssetDefinition(
+  source: CustomPetManifest | CustomPetLibrary | null | undefined,
+  appearanceId: PetAppearanceId | LegacyCustomPetAppearanceId,
+  state: PetState
+): PetAssetDefinition | null;
+export function getCustomPetAssetDefinition(
+  source: CustomPetAssetSource,
+  appearanceIdOrState: PetAppearanceId | LegacyCustomPetAppearanceId | PetState,
+  maybeState?: PetState
 ): PetAssetDefinition | null {
+  if (maybeState) {
+    const manifest = findCustomPetManifest(source, appearanceIdOrState);
+    if (!manifest || !isCompleteCustomPetManifest(manifest)) return null;
+    const asset = manifest.assets[maybeState];
+    return asset ? { path: asset.relativePath } : null;
+  }
+
+  const custom = source as CustomPetAppearance | null | undefined;
+  const state = appearanceIdOrState as PetState;
   if (!custom || !hasRequiredCustomPetAssets(custom)) return null;
-  const fallbackState = STATE_FALLBACKS[state];
-  const asset =
-    custom.assets[state] ??
-    (fallbackState ? custom.assets[fallbackState] : undefined) ??
-    custom.assets.idle;
-  return asset ? { path: asset.relativePath, isPlaceholder: asset.relativePath !== custom.assets[state]?.relativePath } : null;
+  const asset = custom.assets[state];
+  return asset ? { path: asset.relativePath } : null;
 }
 
 export function getPetAssetDefinition(
-  appearanceId: PetAppearanceId,
+  appearanceId: PetAppearanceId | LegacyCustomPetAppearanceId,
   state: PetState,
-  custom?: CustomPetAppearance | null
+  custom?: CustomPetAssetSource
 ): PetAssetDefinition {
-  if (appearanceId === "custom") {
-    const customAsset = getCustomPetAssetDefinition(custom, state);
+  if (isCustomPetAppearanceId(appearanceId)) {
+    const customAsset = getCustomPetAssetDefinition(custom as CustomPetManifest | CustomPetLibrary | null | undefined, appearanceId, state);
+    if (customAsset) return customAsset;
+  } else if (appearanceId === "custom") {
+    const customAsset = getCustomPetAssetDefinition(custom as CustomPetAppearance | null | undefined, state);
     if (customAsset) return customAsset;
   }
 

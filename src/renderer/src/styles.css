@@ -282,9 +282,10 @@ textarea {
 
 .speech-bubble {
   background: rgba(255, 252, 244, 0.96);
-  border: 1px solid rgba(76, 57, 39, 0.14);
+  border: 2px solid #24201c;
   border-radius: 16px;
   bottom: 214px;
+  box-shadow: 2px 3px 0 rgba(36, 32, 28, 0.18);
   left: 220px;
   min-width: 210px;
   max-width: calc(100% - 12px);
@@ -1574,6 +1575,14 @@ textarea {
   color: rgba(153, 141, 124, 0.78);
 }
 
+textarea.pref-text-input {
+  height: auto;
+  line-height: 1.35;
+  min-height: 64px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
 .pref-static-value {
   color: var(--ink-soft);
   font-size: 12.5px;
@@ -1731,8 +1740,7 @@ textarea {
 
 .custom-pet {
   display: grid;
-  gap: 10px;
-  margin-top: 8px;
+  gap: 4px;
 }
 
 .custom-pet__head {
@@ -1815,6 +1823,114 @@ textarea {
 .custom-pet__status {
   color: var(--ink-soft);
   font-size: 12px;
+}
+
+.custom-pet-generation {
+  align-items: start;
+}
+
+.custom-pet-generation__label {
+  padding-top: 2px;
+}
+
+.custom-pet-generation__body {
+  display: grid;
+  gap: 8px;
+  width: min(100%, 300px);
+}
+
+.custom-pet-generation__status {
+  color: var(--ink-soft);
+  font-size: 12px;
+  justify-self: end;
+}
+
+.custom-pet-generation__form {
+  align-items: start;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+}
+
+.custom-pet-generation__prompt,
+.custom-pet-generation__cli {
+  min-width: 0;
+  width: 100%;
+}
+
+.custom-pet-generation__form > .pref-text-input {
+  min-width: 0;
+  width: 100%;
+}
+
+.custom-pet-generation__button {
+  justify-self: center;
+  min-width: 128px;
+  white-space: nowrap;
+}
+
+.custom-pet__upload-button {
+  min-width: 128px;
+  white-space: nowrap;
+}
+
+.custom-pet-generation__result {
+  color: var(--ink-soft);
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.custom-pet-generation__cli {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  min-height: 52px;
+}
+
+.custom-pet-generation__job {
+  align-items: center;
+  background: rgba(60, 47, 28, 0.035);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: 8px 10px;
+}
+
+.custom-pet-generation__jobs {
+  display: grid;
+  gap: 8px;
+}
+
+.custom-pet-generation__job span {
+  color: var(--ink);
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-pet-generation__job strong {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.custom-pet-generation__job .pref-button {
+  min-width: 118px;
+  white-space: nowrap;
+}
+
+.custom-pet-generation__check-message {
+  background: rgba(168, 90, 53, 0.08);
+  border: 1px solid rgba(168, 90, 53, 0.18);
+  border-radius: 8px;
+  color: var(--warn);
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 8px 10px;
 }
 
 .custom-pet__grid {
@@ -2191,6 +2307,15 @@ textarea {
 
   .pref-button-group {
     justify-content: flex-start;
+  }
+
+  .custom-pet-generation {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .custom-pet-generation__body {
+    width: 100%;
   }
 
   .custom-pet-slot {

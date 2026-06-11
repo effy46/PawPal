@@ -2,7 +2,14 @@ import {
   getPetAssetDefinition,
   resolvePetAppearanceId
 } from "../../shared/petAppearances";
-import type { CustomPetAppearance, PetAppearanceId, PetFacing, PetState } from "../../shared/types";
+import type {
+  CustomPetAppearance,
+  CustomPetLibrary,
+  CustomPetManifest,
+  PetAppearanceId,
+  PetFacing,
+  PetState
+} from "../../shared/types";
 
 const warnedPlaceholders = new Set<string>();
 
@@ -14,6 +21,8 @@ export type PetAsset = {
   displayYOffset?: number;
 };
 
+export type PetAssetSource = CustomPetAppearance | CustomPetManifest | CustomPetLibrary | null | undefined;
+
 function normalizeAssetPaths(path: string | string[]): string[] {
   return Array.isArray(path) ? path : [path];
 }
@@ -21,7 +30,7 @@ function normalizeAssetPaths(path: string | string[]): string[] {
 export function getPetAssetVariantCount(
   appearanceId: PetAppearanceId,
   state: PetState,
-  custom?: CustomPetAppearance | null
+  custom?: PetAssetSource
 ): number {
   const resolvedAppearanceId = resolvePetAppearanceId(appearanceId);
   const asset = getPetAssetDefinition(resolvedAppearanceId, state, custom);
@@ -33,7 +42,7 @@ export function getPetAsset(
   state: PetState,
   variantIndex = 0,
   replayKey = 0,
-  custom?: CustomPetAppearance | null,
+  custom?: PetAssetSource,
   facing?: PetFacing
 ): PetAsset {
   const resolvedAppearanceId = resolvePetAppearanceId(appearanceId);

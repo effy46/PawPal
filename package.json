@@ -65,6 +65,8 @@
   "dependencies": {
     "@fontsource/huninn": "^5.2.4",
     "electron-store": "^10.1.0",
+    "gifenc": "^1.0.3",
+    "gifuct-js": "^2.1.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
