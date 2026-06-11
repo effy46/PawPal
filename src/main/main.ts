@@ -77,14 +77,23 @@ import {
 import type { DisplayBounds, SavedWindowPosition } from "./displayPosition";
 import { classifyDistraction, isPermissionError, readActiveWindow } from "./distraction";
 import { applyLaunchAtLoginPreference, getLaunchAtLoginState } from "./loginItem";
+import {
+  clearAppleCalendarMeetingCache,
+  isAppleCalendarPermissionError,
+  readAppleCalendarMeetings
+} from "./appleCalendar";
 import { parseIcsZoomMeetings } from "./icsCalendar";
 import type { CalendarMeeting } from "./icsCalendar";
+import { readZoomMeetingCache } from "./zoomMeetingCache";
 import {
   buildApplicationMenuTemplate,
   buildPetContextMenuTemplate,
   buildTrayMenuTemplate
 } from "./menus";
 import { createTrayImage } from "./trayIcon";
+import { normalizeCustomPetBundle } from "./customPetGif";
+import { createCustomPetJob, reconcileCustomPetJob } from "./customPetJobs";
+import { createCustomPetStore, type CustomPetStore } from "./customPetStore";
 import { getStoredSettings, normalizeSettings } from "./settingsStore";
 import {
   getCurrentStats,
@@ -197,6 +206,7 @@ let zoomMeetingAlerted = new Set<string>();
 let zoomMeetingJoinActions = new Map<string, string>();
 let zoomMeetingActionCounter = 0;
 let zoomMeetingIcsErrorShown = false;
+let zoomMeetingAppleErrorShown = false;
 let distractionStatus: DistractionStatus = {
   state: "idle",
   activeApp: "",
@@ -3047,6 +3057,22 @@ function zoomMeetingAlertKey(meeting: CalendarMeeting, phase: "lead" | "start"):
   return `${meeting.uid}:${meeting.startMs}:${phase}`;
 }
 
+function zoomMeetingCachePath(): string {
+  return join(app.getPath("userData"), "outlook-meetings.json");
+}
+
+function dedupeZoomMeetings(meetings: CalendarMeeting[]): CalendarMeeting[] {
+  const byKey = new Map<string, CalendarMeeting>();
+  for (const meeting of meetings) {
+    // The same meeting arrives from multiple sources (ICS, drop file, Apple Calendar)
+    // with different uids, so key on start time + Zoom meeting number instead.
+    const meetingNumber = meeting.joinUrl.match(/\/j\/(\d+)/)?.[1];
+    const key = `${meeting.startMs}:${meetingNumber ?? meeting.joinUrl}`;
+    if (!byKey.has(key)) byKey.set(key, meeting);
+  }
+  return Array.from(byKey.values()).sort((left, right) => left.startMs - right.startMs);
+}
+
 async function readZoomMeetingsFromIcs(settings: Settings): Promise<CalendarMeeting[]> {
   const url = normalizeIcsUrl(settings.zoomMeetingIcsUrl);
   if (!url) return [];
@@ -3061,6 +3087,38 @@ async function readZoomMeetingsFromIcs(settings: Settings): Promise<CalendarMeet
   zoomMeetingIcsCache = { url, fetchedAt: now, meetings };
   zoomMeetingIcsErrorShown = false;
   return meetings;
+}
+
+async function readZoomMeetings(settings: Settings): Promise<CalendarMeeting[]> {
+  const meetings: CalendarMeeting[] = [];
+  let icsError: unknown = null;
+  if (settings.zoomMeetingIcsUrl.trim()) {
+    try {
+      meetings.push(...await readZoomMeetingsFromIcs(settings));
+    } catch (error) {
+      icsError = error;
+    }
+  }
+
+  if (settings.zoomMeetingAppleCalendarEnabled && process.platform === "darwin") {
+    try {
+      meetings.push(...await readAppleCalendarMeetings(Date.now(), ZOOM_MEETING_HORIZON_MS));
+      zoomMeetingAppleErrorShown = false;
+    } catch (error) {
+      if (!zoomMeetingAppleErrorShown) {
+        zoomMeetingAppleErrorShown = true;
+        const message = isAppleCalendarPermissionError(error)
+          ? pick(text().bubble.zoomMeetingApplePermission)
+          : pick(text().bubble.zoomMeetingAppleError);
+        showBubble({ id: "zoom-meeting-apple-error", message, autoDismissMs: 4200 });
+      }
+    }
+  }
+
+  meetings.push(...await readZoomMeetingCache(zoomMeetingCachePath(), Date.now(), ZOOM_MEETING_HORIZON_MS));
+  const deduped = dedupeZoomMeetings(meetings);
+  if (deduped.length || !icsError) return deduped;
+  throw icsError;
 }
 
 function registerZoomMeetingJoinAction(joinUrl: string): string {
@@ -3092,22 +3150,23 @@ function showZoomMeetingReminder(meeting: CalendarMeeting, phase: "lead" | "star
 
 async function checkZoomMeetingRemindersNow(): Promise<void> {
   const settings = getSettings();
-  if (!settings.zoomMeetingReminderEnabled || !settings.zoomMeetingIcsUrl.trim()) return;
+  if (!settings.zoomMeetingReminderEnabled) return;
   try {
-    const meetings = await readZoomMeetingsFromIcs(settings);
+    const meetings = await readZoomMeetings(settings);
     const now = Date.now();
     const leadMs = settings.zoomMeetingReminderLeadMinutes * 60 * 1000;
     for (const meeting of meetings) {
       const leadKey = zoomMeetingAlertKey(meeting, "lead");
       const leadTarget = meeting.startMs - leadMs;
-      if (leadMs > 0 && !zoomMeetingAlerted.has(leadKey) && now >= leadTarget && now <= leadTarget + ZOOM_MEETING_ALERT_WINDOW_MS) {
+      if (leadMs > 0 && !zoomMeetingAlerted.has(leadKey) && now >= leadTarget && now < meeting.startMs) {
         zoomMeetingAlerted.add(leadKey);
         showZoomMeetingReminder(meeting, "lead", settings.zoomMeetingReminderLeadMinutes);
         return;
       }
 
       const startKey = zoomMeetingAlertKey(meeting, "start");
-      if (!zoomMeetingAlerted.has(startKey) && now >= meeting.startMs && now <= meeting.startMs + ZOOM_MEETING_ALERT_WINDOW_MS) {
+      const startReminderEndsAt = Math.min(meeting.endMs, meeting.startMs + ZOOM_MEETING_START_GRACE_MS);
+      if (!zoomMeetingAlerted.has(startKey) && now >= meeting.startMs && now <= startReminderEndsAt) {
         zoomMeetingAlerted.add(startKey);
         showZoomMeetingReminder(meeting, "start", settings.zoomMeetingReminderLeadMinutes);
         return;
@@ -3127,7 +3186,11 @@ function scheduleZoomMeetingReminders(): void {
     zoomMeetingTimer = null;
   }
   const settings = getSettings();
-  if (!settings.zoomMeetingReminderEnabled || !settings.zoomMeetingIcsUrl.trim()) {
+  if (!settings.zoomMeetingReminderEnabled || !settings.zoomMeetingAppleCalendarEnabled) {
+    clearAppleCalendarMeetingCache();
+    zoomMeetingAppleErrorShown = false;
+  }
+  if (!settings.zoomMeetingReminderEnabled) {
     zoomMeetingIcsCache = null;
     zoomMeetingIcsErrorShown = false;
     return;

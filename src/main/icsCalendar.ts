@@ -6,6 +6,14 @@ export type CalendarMeeting = {
   joinUrl: string;
 };
 
+export type RecurringCalendarEvent = {
+  uid: string;
+  title: string;
+  startMs: number;
+  endMs: number;
+  rrule: string;
+};
+
 type IcsEvent = {
   uid: string;
   title: string;
@@ -93,7 +101,7 @@ export function extractZoomJoinUrl(text: string): string | null {
 
 function pushMeeting(
   meetings: CalendarMeeting[],
-  event: IcsEvent,
+  event: { uid: string; title: string },
   startMs: number,
   durationMs: number,
   joinUrl: string
@@ -107,7 +115,12 @@ function pushMeeting(
   });
 }
 
-function expandRecurringEvent(event: IcsEvent, nowMs: number, horizonMs: number, joinUrl: string): CalendarMeeting[] {
+export function expandRecurringEvent(
+  event: RecurringCalendarEvent,
+  nowMs: number,
+  horizonMs: number,
+  joinUrl: string
+): CalendarMeeting[] {
   const meetings: CalendarMeeting[] = [];
   if (!event.startMs || !event.endMs || !event.rrule) return meetings;
   const rule = parseRule(event.rrule);
@@ -184,7 +197,14 @@ export function parseIcsZoomMeetings(raw: string, nowMs = Date.now(), horizonMs 
       const joinUrl = extractZoomJoinUrl(`${event.url}\n${event.location}\n${event.description}`);
       if (event.status.toUpperCase() !== "CANCELLED" && event.startMs && event.endMs && joinUrl) {
         if (event.rrule) {
-          meetings.push(...expandRecurringEvent(event, nowMs, horizonMs, joinUrl));
+          meetings.push(
+            ...expandRecurringEvent(
+              { uid: event.uid, title: event.title, startMs: event.startMs, endMs: event.endMs, rrule: event.rrule },
+              nowMs,
+              horizonMs,
+              joinUrl
+            )
+          );
         } else if (event.startMs >= nowMs - 5 * 60 * 1000 && event.startMs <= nowMs + horizonMs) {
           pushMeeting(meetings, event, event.startMs, Math.max(0, event.endMs - event.startMs), joinUrl);
         }

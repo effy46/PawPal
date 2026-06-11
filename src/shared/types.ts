@@ -164,6 +164,7 @@ export type Settings = {
   zoomShareAutoHideEnabled: boolean;
   zoomMeetingReminderEnabled: boolean;
   zoomMeetingIcsUrl: string;
+  zoomMeetingAppleCalendarEnabled: boolean;
   zoomMeetingReminderLeadMinutes: number;
   agentActivityRetentionMinutes: number;
   breakReminderEnabled: boolean;

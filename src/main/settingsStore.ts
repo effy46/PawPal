@@ -111,6 +111,7 @@ export function normalizeSettings(stored: Partial<Settings> = {}): Settings {
       typeof stored.zoomMeetingIcsUrl === "string"
         ? stored.zoomMeetingIcsUrl.trim()
         : DEFAULT_SETTINGS.zoomMeetingIcsUrl,
+    zoomMeetingAppleCalendarEnabled: stored.zoomMeetingAppleCalendarEnabled === true,
     zoomMeetingReminderLeadMinutes: normalizeNumber(
       stored.zoomMeetingReminderLeadMinutes,
       DEFAULT_SETTINGS.zoomMeetingReminderLeadMinutes,

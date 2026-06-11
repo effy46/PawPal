@@ -1253,6 +1253,17 @@ export function SettingsView(): JSX.Element {
               }
             />
             <Row
+              label={labels.zoomMeetingAppleCalendar}
+              hint={labels.zoomMeetingAppleCalendarHelp}
+              control={
+                <ToggleControl
+                  checked={draft.zoomMeetingAppleCalendarEnabled}
+                  onChange={(zoomMeetingAppleCalendarEnabled) => updateDraft({ zoomMeetingAppleCalendarEnabled })}
+                  ariaLabel={labels.zoomMeetingAppleCalendar}
+                />
+              }
+            />
+            <Row
               label={labels.zoomMeetingReminderLead}
               control={
                 <NumberControl

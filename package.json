@@ -26,6 +26,9 @@
       ],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "PawPal reads your calendar to remind you about Zoom meetings."
+      },
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "notarize": true

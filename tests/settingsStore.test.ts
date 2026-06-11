@@ -45,6 +45,26 @@ export const tests = [
     }
   },
   {
+    name: "normalizeSettings defaults Apple Calendar source to disabled",
+    run(): void {
+      assert.equal(DEFAULT_SETTINGS.zoomMeetingAppleCalendarEnabled, false);
+      assert.equal(normalizeSettings().zoomMeetingAppleCalendarEnabled, false);
+      assert.equal(
+        normalizeSettings({ zoomMeetingAppleCalendarEnabled: "yes" as never }).zoomMeetingAppleCalendarEnabled,
+        false
+      );
+    }
+  },
+  {
+    name: "normalizeSettings preserves enabled Apple Calendar source",
+    run(): void {
+      assert.equal(
+        normalizeSettings({ zoomMeetingAppleCalendarEnabled: true }).zoomMeetingAppleCalendarEnabled,
+        true
+      );
+    }
+  },
+  {
     name: "normalizeSettings clamps daily water goal",
     run(): void {
       assert.equal(normalizeSettings({ dailyWaterGoal: 0 }).dailyWaterGoal, 1);

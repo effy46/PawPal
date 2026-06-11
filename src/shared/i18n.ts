@@ -99,6 +99,14 @@ export const I18N = {
       zoomMeetingIcsError: [
         "没读到日历链接，请检查 Settings 里的 ICS URL",
         "Zoom 会议提醒暂时读不到日历"
+      ],
+      zoomMeetingApplePermission: [
+        "想读 Apple 日历需要授权：系统设置 → 隐私与安全性 → 自动化，允许 PawPal 访问“日历”",
+        "请在 系统设置 → 隐私与安全性 → 自动化 里允许 PawPal 控制“日历”"
+      ],
+      zoomMeetingAppleError: [
+        "暂时读不到 Apple 日历",
+        "Apple 日历会议暂时获取失败"
       ]
     },
     actions: {
@@ -158,9 +166,11 @@ export const I18N = {
       zoomMeetingIcsUrlHelp:
         "请打开 Outlook 网页版（不是桌面 App）：设置 → 日历 → 共享日历 → 发布日历，复制 ICS 链接。如果看不到“共享日历/发布日历”，通常是公司管理员关闭了日历发布。请不要公开分享这个链接。",
       zoomMeetingIcsPlaceholder: "粘贴 https://.../calendar.ics 或 webcal://...",
+      zoomMeetingAppleCalendar: "从 Apple 日历读取会议",
+      zoomMeetingAppleCalendarHelp: "macOS 专用；直接从“日历”App 读取 Zoom 会议，首次读取会请求自动化权限。",
       zoomMeetingReminderLead: "提前提醒",
       agentActivityRetention: "任务泡泡保留时间",
-      agentActivityRetentionHelp: "控制 Codex / Claude / Cursor 任务卡片在活动后保留多久。",
+      agentActivityRetentionHelp: "控制 Codex / Claude Code / Claude Desktop / Cursor 任务卡片在活动后保留多久。",
       updateIdle: "还没有检查更新。",
       updateAvailable: (version: string) => `发现新版本 ${version}`,
       updateCurrent: (version: string) => `已是最新版本 ${version}`,
@@ -469,6 +479,14 @@ export const I18N = {
       zoomMeetingIcsError: [
         "I could not read the calendar link. Check the ICS URL in Settings.",
         "Zoom meeting reminders cannot read your calendar yet."
+      ],
+      zoomMeetingApplePermission: [
+        "To read Apple Calendar, allow PawPal under System Settings → Privacy & Security → Automation.",
+        "Apple Calendar needs permission: System Settings → Privacy & Security → Automation → PawPal."
+      ],
+      zoomMeetingAppleError: [
+        "I could not read Apple Calendar just now.",
+        "Apple Calendar meetings are unavailable right now."
       ]
     },
     actions: {
@@ -532,9 +550,12 @@ export const I18N = {
       zoomMeetingIcsUrlHelp:
         "Use Outlook on the web, not the desktop app: Settings → Calendar → Shared calendars → Publish a calendar. If Shared calendars / Publish calendar is missing, your org likely disabled calendar publishing. Keep the link private.",
       zoomMeetingIcsPlaceholder: "Paste https://.../calendar.ics or webcal://...",
+      zoomMeetingAppleCalendar: "Read Meetings from Apple Calendar",
+      zoomMeetingAppleCalendarHelp:
+        "macOS only; reads Zoom meetings directly from the Calendar app. The first read asks for Automation permission.",
       zoomMeetingReminderLead: "Remind Before",
       agentActivityRetention: "Task Bubble Retention",
-      agentActivityRetentionHelp: "How long Codex / Claude / Cursor task cards stay visible after activity.",
+      agentActivityRetentionHelp: "How long Codex / Claude Code / Claude Desktop / Cursor task cards stay visible after activity.",
       updateIdle: "Updates have not been checked yet.",
       updateAvailable: (version: string) => `Version ${version} is available.`,
       updateCurrent: (version: string) => `You are on the latest version ${version}.`,
