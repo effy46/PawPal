@@ -296,6 +296,19 @@ textarea {
   z-index: 2;
 }
 
+/* Tail: ink triangle (::before) under cream triangle (::after).
+   Both share slope 9:10 and apex x = 47px; ink apex sits 3px lower,
+   so the exposed ink reads as a uniform ~2px outline along the slants. */
+.speech-bubble::before {
+  border-left: 10.8px solid transparent;
+  border-right: 10.8px solid transparent;
+  border-top: 12px solid #24201c;
+  bottom: -12px;
+  content: "";
+  left: 36.2px;
+  position: absolute;
+}
+
 .speech-bubble::after {
   border-left: 9px solid transparent;
   border-right: 9px solid transparent;
