@@ -120,10 +120,14 @@ type StoreSchema = {
 
 type SettingsCopy = ReturnType<typeof i18n>["settings"];
 const ZOOM_SHARE_CHECK_INTERVAL_MS = 2_500;
+// Return-leg speed sits at the top of the wander speed range (3.5-6.4 px/tick) so the
+// run home reads as the same gait; the cap bounds the leg even across a huge display.
+const BREAK_RUN_RETURN_SPEED = 6.4;
+const BREAK_RUN_RETURN_MAX_MS = 5_000;
 const ZOOM_MEETING_CHECK_INTERVAL_MS = 60_000;
 const ZOOM_MEETING_ICS_CACHE_MS = 5 * 60 * 1000;
 const ZOOM_MEETING_HORIZON_MS = 12 * 60 * 60 * 1000;
-const ZOOM_MEETING_ALERT_WINDOW_MS = 75 * 1000;
+const ZOOM_MEETING_START_GRACE_MS = 10 * 60 * 1000;
 const ZOOM_MEETING_BUBBLE_MS = 10 * 60 * 1000;
 const REMINDER_BUSY_RETRY_MS = 5 * 60 * 1000;
 
@@ -162,6 +166,9 @@ let focusStartedAt: number | null = null;
 let breakRunTimer: NodeJS.Timeout | null = null;
 let breakRunCountdownTimer: NodeJS.Timeout | null = null;
 let breakRunMovementTimer: NodeJS.Timeout | null = null;
+let breakRunReturnTimer: NodeJS.Timeout | null = null;
+let breakRunReturnSafetyTimer: NodeJS.Timeout | null = null;
+let breakRunOrigin: PetPosition | null = null;
 let breakTimer: NodeJS.Timeout | null = null;
 let hydrationTimer: NodeJS.Timeout | null = null;
 let focusTimer: NodeJS.Timeout | null = null;
@@ -2668,6 +2675,14 @@ function clearBreakRunTimers(): void {
     clearInterval(breakRunMovementTimer);
     breakRunMovementTimer = null;
   }
+  if (breakRunReturnTimer) {
+    clearInterval(breakRunReturnTimer);
+    breakRunReturnTimer = null;
+  }
+  if (breakRunReturnSafetyTimer) {
+    clearTimeout(breakRunReturnSafetyTimer);
+    breakRunReturnSafetyTimer = null;
+  }
 }
 
 function showBreakRunCountdown(endsAt: number): void {
@@ -2740,8 +2755,67 @@ function movePetForBreakRun(): void {
   });
 }
 
+function snapPetToBreakRunOrigin(): void {
+  if (!breakRunOrigin || !petWindow || petWindow.isDestroyed()) return;
+  const bounds = petWindow.getBounds();
+  petWindow.setBounds({ ...bounds, x: Math.round(breakRunOrigin.x), y: Math.round(breakRunOrigin.y) });
+}
+
+function movePetForBreakRunReturn(): void {
+  if (!breakRunOrigin || !petWindow || petWindow.isDestroyed() || !petWindow.isVisible()) {
+    finishBreakRun();
+    return;
+  }
+  const bounds = petWindow.getBounds();
+  const dx = breakRunOrigin.x - bounds.x;
+  const dy = breakRunOrigin.y - bounds.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance <= BREAK_RUN_RETURN_SPEED) {
+    snapPetToBreakRunOrigin();
+    finishBreakRun();
+    return;
+  }
+  setPetFacing(dx >= 0 ? "right" : "left");
+  petWindow.setBounds({
+    ...bounds,
+    x: Math.round(bounds.x + (dx / distance) * BREAK_RUN_RETURN_SPEED),
+    y: Math.round(bounds.y + (dy / distance) * BREAK_RUN_RETURN_SPEED)
+  });
+}
+
+function startBreakRunReturn(): void {
+  if (breakRunMovementTimer) {
+    clearInterval(breakRunMovementTimer);
+    breakRunMovementTimer = null;
+  }
+  if (breakRunCountdownTimer) {
+    clearInterval(breakRunCountdownTimer);
+    breakRunCountdownTimer = null;
+  }
+  if (!breakRunOrigin || !petWindow || petWindow.isDestroyed() || !petWindow.isVisible()) {
+    finishBreakRun();
+    return;
+  }
+  hideBubble();
+  // Display layout may have changed mid-run; pull the origin back into visible space.
+  const bounds = petWindow.getBounds();
+  const clamped = visibleWindowBounds(currentDisplays(), primaryDisplay(), {
+    x: breakRunOrigin.x,
+    y: breakRunOrigin.y,
+    width: bounds.width,
+    height: bounds.height
+  });
+  breakRunOrigin = { x: clamped.x, y: clamped.y };
+  breakRunReturnTimer = setInterval(movePetForBreakRunReturn, BREAK_RUN_TICK_MS);
+  breakRunReturnSafetyTimer = setTimeout(() => {
+    snapPetToBreakRunOrigin();
+    finishBreakRun();
+  }, BREAK_RUN_RETURN_MAX_MS);
+}
+
 function finishBreakRun(): void {
   clearBreakRunTimers();
+  breakRunOrigin = null;
   breakRunFormatter = null;
   blockingMode = null;
   hideBubble();
@@ -2766,6 +2840,10 @@ function startBreakRun(): void {
   blockingMode = "breakRun";
   breakDueAt = null;
   breakRunFormatter = pick(text().bubble.breakRun);
+  if (petWindow && !petWindow.isDestroyed()) {
+    const startBounds = petWindow.getBounds();
+    breakRunOrigin = { x: startBounds.x, y: startBounds.y };
+  }
   breakRunVelocity = chooseBreakRunVelocity();
   nextBreakRunTurnAt = Date.now();
   setPetState("breakRunning");
@@ -2775,7 +2853,7 @@ function startBreakRun(): void {
   showBreakRunCountdown(endsAt);
   breakRunCountdownTimer = setInterval(() => showBreakRunCountdown(endsAt), 1000);
   breakRunMovementTimer = setInterval(movePetForBreakRun, BREAK_RUN_TICK_MS);
-  breakRunTimer = setTimeout(finishBreakRun, durationMs);
+  breakRunTimer = setTimeout(startBreakRunReturn, durationMs);
   publishSnapshot();
 }
 
