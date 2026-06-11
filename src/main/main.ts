@@ -3255,6 +3255,218 @@ function openMacAppByName(appName: string): Promise<void> {
   });
 }
 
+function appleScriptString(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function uniqueNonEmptyStrings(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+function claudeCodeOpenTitleCandidates(sessionId: string, sessionTitle?: string): string[] {
+  const trackedSession = agentActivities["claude-code"].sessions.find((session) => session.id === sessionId);
+  return uniqueNonEmptyStrings([sessionTitle, trackedSession?.title]);
+}
+
+function claudeCodeTerminalSearchTerms(sessionTitles: string[]): string[] {
+  const terms = new Set<string>();
+  for (const sessionTitle of sessionTitles) {
+    const normalized = sessionTitle
+      .replace(/[.…]+/g, " ")
+      .replace(/[^a-zA-Z0-9/_ -]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (normalized.length >= 8) {
+      terms.add(normalized.slice(0, 48));
+      terms.add(normalized);
+    }
+    const words = normalized.split(/[\s-]+/).filter((word) => word.length >= 4);
+    for (let index = 0; index < words.length - 1; index += 1) {
+      terms.add(`${words[index]} ${words[index + 1]}`);
+    }
+  }
+  return Array.from(terms).filter((term) => term.length >= 8).slice(0, 8);
+}
+
+function terminalClaudeCodeFallbackTerms(): string[] {
+  return ["claude code", "claude"];
+}
+
+function claudeCodeTerminalRaiseScript(sessionTitles: string[]): string {
+  const processNames = CLAUDE_CODE_TERMINAL_PROCESSES.map((name) => `"${name}"`).join(", ");
+  const searchTerms = claudeCodeTerminalSearchTerms(sessionTitles);
+  const targetTerms = searchTerms.length ? searchTerms.map(appleScriptString).join(", ") : "";
+  const fallbackTerms = terminalClaudeCodeFallbackTerms().map(appleScriptString).join(", ");
+  return `
+use framework "AppKit"
+use scripting additions
+
+-- AppleScript "activate" and System Events "set frontmost" raise ALL of an app's
+-- windows; activateWithOptions without NSApplicationActivateAllWindows raises only
+-- the app's front window, leaving its other windows at their global z-positions.
+on raiseAppWindowOnly(bundleId)
+  try
+    set runningApps to current application's NSRunningApplication's runningApplicationsWithBundleIdentifier:bundleId
+    set theApp to runningApps's firstObject()
+    if theApp is not missing value then
+      theApp's activateWithOptions:(current application's NSApplicationActivateIgnoringOtherApps)
+      return true
+    end if
+  end try
+  return false
+end raiseAppWindowOnly
+
+on textMatchesAny(rawText, targetTerms)
+  if (count of targetTerms) is 0 then return false
+  set rawTextValue to rawText as text
+  ignoring case
+    repeat with targetTerm in targetTerms
+      set targetText to targetTerm as text
+      if targetText is not "" and rawTextValue contains targetText then return true
+    end repeat
+  end ignoring
+  return false
+end textMatchesAny
+
+set targetTerms to {${targetTerms}}
+set fallbackTerms to {${fallbackTerms}}
+
+if (count of targetTerms) is greater than 0 then
+  try
+    tell application "Terminal"
+      -- Pass 1: window-level match. Merged-window tabs are separate windows whose
+      -- name carries the session title; "selected" is a no-op on windows, so the
+      -- window must be raised via "frontmost".
+      repeat with windowRef in windows
+        set windowText to ""
+        try
+          set windowText to windowText & (name of windowRef as text)
+        end try
+        try
+          set windowText to windowText & " " & (custom title of windowRef as text)
+        end try
+        try
+          set windowText to windowText & " " & (tty of windowRef as text)
+        end try
+        if my textMatchesAny(windowText, targetTerms) then
+          set frontmost of windowRef to true
+          my raiseAppWindowOnly("com.apple.Terminal")
+          return "Terminal"
+        end if
+      end repeat
+      -- Pass 2: native (cmd-T) tabs. Background tab titles are invisible at the
+      -- window level, so match per tab and select it before raising the window.
+      repeat with windowRef in windows
+        repeat with tabRef in tabs of windowRef
+          set tabText to ""
+          try
+            set tabText to tabText & (custom title of tabRef as text)
+          end try
+          try
+            set tabText to tabText & " " & (tty of tabRef as text)
+          end try
+          if my textMatchesAny(tabText, targetTerms) then
+            set selected of tabRef to true
+            set frontmost of windowRef to true
+            my raiseAppWindowOnly("com.apple.Terminal")
+            return "Terminal"
+          end if
+        end repeat
+      end repeat
+      repeat with windowRef in windows
+        set windowText to ""
+        try
+          set windowText to windowText & (name of windowRef as text)
+        end try
+        try
+          set windowText to windowText & " " & (custom title of windowRef as text)
+        end try
+        if my textMatchesAny(windowText, fallbackTerms) then
+          set frontmost of windowRef to true
+          my raiseAppWindowOnly("com.apple.Terminal")
+          return "Terminal"
+        end if
+      end repeat
+    end tell
+  end try
+end if
+
+tell application "System Events"
+  repeat with processName in {${processNames}}
+    set processNameText to processName as text
+    if exists application process processNameText then
+      tell application process processNameText
+        repeat with windowRef in windows
+          set windowText to ""
+          try
+            set windowText to windowText & (name of windowRef as text)
+          end try
+          try
+            set windowText to windowText & " " & (value of attribute "AXTitle" of windowRef as text)
+          end try
+          if my textMatchesAny(windowText, targetTerms) then
+            try
+              perform action "AXRaise" of windowRef
+            end try
+            set processBundleId to ""
+            try
+              set processBundleId to bundle identifier as text
+            end try
+            if processBundleId is "" or not (my raiseAppWindowOnly(processBundleId)) then set frontmost to true
+            return processNameText
+          end if
+          ignoring case
+            if windowText contains "claude" then
+              try
+                perform action "AXRaise" of windowRef
+              end try
+              set processBundleId to ""
+              try
+                set processBundleId to bundle identifier as text
+              end try
+              if processBundleId is "" or not (my raiseAppWindowOnly(processBundleId)) then set frontmost to true
+              return processNameText
+            end if
+          end ignoring
+        end repeat
+      end tell
+    end if
+  end repeat
+end tell
+return ""
+`;
+}
+
+function raiseClaudeCodeTerminalWindow(sessionTitles: string[]): Promise<boolean> {
+  if (process.platform !== "darwin") return Promise.resolve(false);
+  return new Promise((resolveRaised) => {
+    execFile("/usr/bin/osascript", ["-e", claudeCodeTerminalRaiseScript(sessionTitles)], { timeout: 2500 }, (error, stdout) => {
+      resolveRaised(!error && stdout.trim().length > 0);
+    });
+  });
+}
+
+async function openInstalledClaudeCodeTerminal(): Promise<boolean> {
+  if (process.platform !== "darwin") return false;
+  for (const bundleId of CLAUDE_CODE_TERMINAL_BUNDLES) {
+    try {
+      await openMacBundle(bundleId);
+      return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
+
 async function openDesktopDeepLink(
   url: string,
   target: { bundleId: string; label: string }
