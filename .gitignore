@@ -6,3 +6,8 @@ dist/
 *.log
 _raw_assets/
 CLAUDE.md
+tmp/
+.cursor/
+.impeccable/
+outlook-meetings.json
+pet_assets/备用图/
