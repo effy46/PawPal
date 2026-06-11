@@ -27,16 +27,20 @@ Apple Calendar becomes a third merged input. Sources are additive, not exclusive
 
 ### New module `src/main/appleCalendar.ts`
 
-- `readAppleCalendarMeetings(nowMs, horizonMs): Promise<CalendarMeeting[]>` — runs `/usr/bin/osascript -l JavaScript` (JXA) via `execFile`, 30 s timeout, parses JSON from stdout.
-- JXA script queries Calendar.app across all calendars. **Critical: Calendar.app scripting does NOT expand recurring events** — masters keep their original start date. Per calendar, fetch two sets:
-  1. Events whose startDate is within [now − 5 min, now + horizon] (one-off + masters starting in window).
-  2. Events whose recurrence is non-empty and startDate < window end (recurring masters).
-  Output per event: `{uid, title, startMs, endMs, location, description, url, rrule, excludedDatesMs[]}` (rrule = Calendar.app `recurrence` string, RRULE-format).
+- `readAppleCalendarMeetings(nowMs, horizonMs): Promise<CalendarMeeting[]>` — runs `/usr/bin/osascript -l JavaScript` (JXA) via `execFile`, **90 s timeout**, parses JSON from stdout. In-flight promise dedup (poll ticks must not stack osascript runs) and negative caching on failure (keep stale meetings, don't respawn every tick).
+- JXA script queries Calendar.app across all calendars. **As-built notes from live verification (2026-06-11, real Exchange calendar, 542 events / 272 recurring masters):**
+  - Calendar.app scripting does NOT expand recurring events — masters keep their original start date; expansion happens in the mapper.
+  - `whose({recurrence: {_notEqualTo: null}})` throws "Illegal comparison or logical" on every calendar — use `recurrence` begins-with `"FREQ"` filtering. (Verified live; the notEqualTo form silently returned zero recurring meetings.)
+  - Per-event property access costs one Apple Event each (~100 s total); `whose`-query bulk reads re-evaluate the filter per property (~5 min). The only viable shape: bulk property arrays over ALL events per calendar (`events.uid()`, `events.startDate()`, …), index selection in JS. Measured ~40-45 s end-to-end.
+  - `description` is deliberately NOT fetched — event bodies dominate runtime, and Zoom's Outlook add-in puts the join link in location/URL (272/272 events verified). Known limitation: meetings whose Zoom link exists only in the body are missed by this source.
+  Output per event: `{uid, title, startMs, endMs, location, description: "", url, rrule, excludedDatesMs[]}` (rrule = Calendar.app `recurrence` string, RRULE-format).
 - Pure mapper `mapAppleCalendarEvents(events, nowMs, horizonMs): CalendarMeeting[]`:
   - Zoom link extraction via existing `extractZoomJoinUrl` from icsCalendar.ts over url + location + description.
-  - Recurring expansion reuses icsCalendar's RRULE expansion (export/extract the existing `expandRecurringEvent` logic into a shared helper rather than duplicating; DAILY/WEEKLY with INTERVAL/COUNT/UNTIL/BYDAY as already supported). Skip occurrences in `excludedDatesMs`.
+  - Recurring expansion reuses icsCalendar's exported `expandRecurringEvent` (DAILY/WEEKLY with INTERVAL/COUNT/UNTIL/BYDAY). Occurrences matching `excludedDatesMs` are skipped with ±1 h tolerance (fixed-step expansion vs wall-clock exclusions drift across DST).
   - Dedup not needed here (main.ts dedupes globally); sort by startMs.
-- In-module cache: 2 min (`ZOOM_MEETING_APPLE_CACHE_MS = 120_000`) — fresher than the 5-min ICS cache to catch last-minute invites.
+- In-module cache: 5 min (`ZOOM_MEETING_APPLE_CACHE_MS`) — 2 min was the original plan but a ~40 s scan every 2 min is a 33% duty cycle; 5 min stays within the 10-min start-grace window.
+- main.ts `dedupeZoomMeetings` keys on `startMs + Zoom meeting number` (not uid) — the same meeting arrives from multiple sources with different uids (verified: Apple Calendar and the drop file returned the same meeting, same join URL, different uids).
+- Future fast-path (not in v1): EventKit via JXA ObjC bridge — milliseconds, recurrences pre-expanded, but the full-access TCC prompt requires `NSCalendarsFullAccessUsageDescription` from the responsible app, which can't be live-verified outside a packaged build. Revisit if the 40 s scan becomes a problem.
 
 ### main.ts wiring
 
