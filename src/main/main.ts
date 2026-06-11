@@ -3023,10 +3023,9 @@ async function checkZoomShareAutoHideNow(): Promise<void> {
     hidePetsForZoomShare();
     return;
   }
-  if (status.state === "not-sharing") {
-    restorePetsAfterZoomShare();
-    return;
-  }
+  // Anything other than a positive "sharing" reading must restore the pets:
+  // leaving them hidden because detection became unavailable strands them invisible.
+  restorePetsAfterZoomShare();
   if (status.state === "permission-needed" && !zoomSharePermissionHintShown) {
     zoomSharePermissionHintShown = true;
     showBubble({ id: "zoom-share-permission", message: pick(text().bubble.zoomSharePermission), autoDismissMs: 3200 });
