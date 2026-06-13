@@ -153,6 +153,8 @@ PawPal can reflect live coding-agent work directly in the pet UI. Agent source i
 
 If several chats are active, PawPal groups them behind a count badge that can expand into separate chat cards and be browsed with controls or the mouse wheel. Agent bubbles and chat cards can open the matching Codex chat, raise the running Claude Code terminal window when possible, open the matching Claude Desktop session, or open Cursor. You can adjust how long task bubbles stay visible in Settings -> System with Task Bubble Retention. Break, hydration, and focus reminders still take priority, so health nudges never get buried behind coding status.
 
+Agent chat bubbles can show used context with the existing top-right status circle upgraded into a ring. The center number is percent of context used, and the ring fills as usage rises. Colors are green under 40%, yellow from 40-64%, orange from 65-79%, and red at 80% or when the remaining reserve is critically low. If token data is unavailable, PawPal keeps the original status dot/check. The design is documented in [docs/agent-context-monitor.md](docs/agent-context-monitor.md).
+
 ### Dual Agent Mode Design
 
 Dual Agent Mode lets PawPal show two desktop pets at once for dual-screen workflows. Each pet slot has its own pet appearance, agent source, and health-reminder ownership. Defaults are Slot A = White Line Dog + Codex + health reminders on, and Slot B = Xiao Ji Mao + Claude Code + health reminders off.
@@ -323,6 +325,8 @@ pnpm dist:win     # 仅打包 Windows；在 macOS 上可能需要 Wine
 PawPal 可以把 coding agent 的工作状态直接显示在桌宠 UI 里。每只宠物都可以选择跟踪 Codex、Claude Code、Claude Desktop、Cursor，或不跟踪 Agent。默认配置是白色线条小狗跟踪 Codex，小鸡毛跟踪 Claude Code。Agent 活跃时，桌宠会显示一个简洁的状态徽标；鼠标悬停可用漫画风思考泡泡查看当前聊天摘要。
 
 如果多个聊天同时活跃，PawPal 会先显示数量徽标，点击后展开为独立聊天卡片，并可用按钮或鼠标滚轮浏览。双击 Agent 泡泡或聊天卡片，可以跳回对应的 Codex 对话；Claude Code 会优先唤起正在运行的终端窗口；Claude Desktop 会打开对应桌面会话；Cursor 会打开 Cursor 应用。你也可以在“设置 -> 系统”里调整任务泡泡保留时间。休息、喝水和专注提醒仍然优先显示，不会被 Agent 状态挡住。
+
+Agent 聊天气泡可以把原本右上角的状态圆点升级成 context 圆环。中间数字表示已用 context 百分比，已用越多，圆环越满。颜色规则是：40% 以下绿色，40-64% 黄色，65-79% 橙色，80% 以上或剩余 reserve 过低时红色。没有 token 数据时，PawPal 保留原本的状态圆点或勾选。设计细节记录在 [docs/agent-context-monitor.md](docs/agent-context-monitor.md)。
 
 ### 双桌宠 Agent 模式
 

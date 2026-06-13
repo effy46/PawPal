@@ -20,6 +20,13 @@ export type CodexActivitySession = {
   message: string | null;
   updatedAt: number;
   path: string;
+  context?: {
+    percentUsed: number;
+    remainingTokens: number;
+    usedTokens: number;
+    windowTokens: number;
+    status: "green" | "yellow" | "orange" | "red";
+  };
 };
 
 export type CodexActivity = {

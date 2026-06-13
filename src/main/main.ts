@@ -373,6 +373,13 @@ type CodexSessionEvent = {
     turn_id?: string;
     thread_source?: string;
     source?: unknown;
+    info?: {
+      last_token_usage?: {
+        input_tokens?: number;
+        total_tokens?: number;
+      };
+      model_context_window?: number;
+    };
   };
 };
 
@@ -418,7 +425,14 @@ type ClaudeSessionEvent = {
   name?: string;
   message?: {
     role?: string;
+    model?: string;
     content?: string | ClaudeContentBlock[];
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+    };
   };
 };
 
@@ -1502,6 +1516,40 @@ function isUserCodexSession(events: CodexSessionEvent[]): boolean {
   return !(meta.source && typeof meta.source === "object" && "subagent" in meta.source);
 }
 
+function latestCodexContextUsage(events: CodexSessionEvent[]): CodexActivitySession["context"] | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const payload = events[index].payload;
+    if (events[index].type !== "event_msg" || payload?.type !== "token_count") continue;
+    const windowTokens = payload.info?.model_context_window;
+    const usedTokens = payload.info?.last_token_usage?.input_tokens ?? payload.info?.last_token_usage?.total_tokens;
+    if (!Number.isFinite(windowTokens) || !Number.isFinite(usedTokens) || !windowTokens || !usedTokens) {
+      return undefined;
+    }
+
+    const remainingTokens = Math.max(0, windowTokens - usedTokens);
+    const percentUsed = Math.max(0, Math.min(100, Math.round((usedTokens / windowTokens) * 100)));
+    const reserveFloor = Math.max(25_000, windowTokens * 0.08);
+    const status =
+      remainingTokens < reserveFloor || percentUsed >= 80
+        ? "red"
+        : percentUsed >= 65
+          ? "orange"
+          : percentUsed >= 40
+            ? "yellow"
+            : "green";
+
+    return {
+      percentUsed,
+      remainingTokens: Math.round(remainingTokens),
+      usedTokens: Math.round(usedTokens),
+      windowTokens: Math.round(windowTokens),
+      status
+    };
+  }
+
+  return undefined;
+}
+
 async function inferCodexSessionFileActivity(file: {
   path: string;
   mtimeMs: number;
@@ -1532,7 +1580,8 @@ async function inferCodexSessionFileActivity(file: {
       state,
       message: messageForCodexSessionEvent(event, labels, events, index),
       updatedAt,
-      path: file.path
+      path: file.path,
+      context: latestCodexContextUsage(events)
     };
   }
 
@@ -1852,6 +1901,60 @@ async function readClaudeCodeSessionTitles(sessionIds: Set<string>): Promise<Map
   return new Map(Array.from(titles, ([sessionId, value]) => [sessionId, value.title]));
 }
 
+const CLAUDE_DEFAULT_CONTEXT_WINDOW = 200_000;
+
+// Claude session logs do not record the context window, so map it from the model id.
+// Current non-Haiku Claude models are natively 1M; Haiku is 200K. Unknown models fall
+// back to the conservative 200K default. (The 1M-vs-200K runtime flag is not persisted
+// to the log, so a model that supports 1M is assumed to run at 1M here.)
+function claudeContextWindowForModel(model: string | undefined): number {
+  if (!model) return CLAUDE_DEFAULT_CONTEXT_WINDOW;
+  const id = model.toLowerCase();
+  if (id.includes("haiku")) return 200_000;
+  if (id.includes("opus") || id.includes("sonnet") || id.includes("fable")) return 1_000_000;
+  return CLAUDE_DEFAULT_CONTEXT_WINDOW;
+}
+
+// Mirrors latestCodexContextUsage. Claude has no single "tokens in context" field — the
+// occupied context is the sum of input + cache-read + cache-creation tokens on the most
+// recent assistant message (output tokens are generation, not context).
+function latestClaudeContextUsage(events: ClaudeSessionEvent[]): CodexActivitySession["context"] | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const message = events[index].message;
+    const usage = message?.usage;
+    if (!usage) continue;
+
+    const usedTokens =
+      (usage.input_tokens ?? 0) +
+      (usage.cache_read_input_tokens ?? 0) +
+      (usage.cache_creation_input_tokens ?? 0);
+    if (!Number.isFinite(usedTokens) || usedTokens <= 0) continue;
+
+    const windowTokens = claudeContextWindowForModel(message?.model);
+    const remainingTokens = Math.max(0, windowTokens - usedTokens);
+    const percentUsed = Math.max(0, Math.min(100, Math.round((usedTokens / windowTokens) * 100)));
+    const reserveFloor = Math.max(25_000, windowTokens * 0.08);
+    const status =
+      remainingTokens < reserveFloor || percentUsed >= 80
+        ? "red"
+        : percentUsed >= 65
+          ? "orange"
+          : percentUsed >= 40
+            ? "yellow"
+            : "green";
+
+    return {
+      percentUsed,
+      remainingTokens: Math.round(remainingTokens),
+      usedTokens: Math.round(usedTokens),
+      windowTokens: Math.round(windowTokens),
+      status
+    };
+  }
+
+  return undefined;
+}
+
 async function inferClaudeSessionFileActivity(
   file: {
     path: string;
@@ -1883,7 +1986,8 @@ async function inferClaudeSessionFileActivity(
       state,
       message: messageForClaudeSessionEvent(event, labels, events, index),
       updatedAt,
-      path: file.path
+      path: file.path,
+      context: latestClaudeContextUsage(events)
     };
   }
 

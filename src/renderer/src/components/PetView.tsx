@@ -123,6 +123,19 @@ function codexPrimarySession(activity: CodexActivity): CodexActivity["sessions"]
   );
 }
 
+function codexContextStyle(
+  session: CodexActivity["sessions"][number] | null | undefined
+): CSSProperties | undefined {
+  const percent = session?.context?.percentUsed;
+  if (typeof percent !== "number") return undefined;
+  return { "--context-progress": `${percent * 3.6}deg` } as CSSProperties;
+}
+
+function codexContextLabel(session: CodexActivity["sessions"][number] | null | undefined): string | undefined {
+  const percent = session?.context?.percentUsed;
+  return typeof percent === "number" ? String(percent) : undefined;
+}
+
 function randomVariant(count: number, previous?: number): number {
   if (count <= 1) return 0;
   let next = Math.floor(Math.random() * count);
@@ -621,6 +634,8 @@ export function PetView(): JSX.Element {
               {visibleCodexSessions.map((session) => (
                 <article
                   className={`codex-chat-card codex-chat-card--${session.state}`}
+                  data-context-percent={codexContextLabel(session)}
+                  data-context-status={session.context?.status}
                   key={session.id}
                   onDoubleClick={(event) => openAgentSession(event, session.id)}
                   onPointerDown={(event) => trackAgentSessionPointerDown(event, session.id)}
@@ -630,6 +645,7 @@ export function PetView(): JSX.Element {
                     setCodexDetailsOpen(true);
                   }}
                   onPointerLeave={() => setCodexDetailsOpen(false)}
+                  style={codexContextStyle(session)}
                 >
                   <span>{session.title}</span>
                   <strong>{codexStateLabel(session.state, labels)}</strong>
@@ -691,11 +707,14 @@ export function PetView(): JSX.Element {
       ) : showCodexActivity ? (
         <div
           className={`codex-badge codex-badge--${codexState}`}
+          data-context-percent={codexContextLabel(primaryCodexSession)}
+          data-context-status={primaryCodexSession?.context?.status}
           onDoubleClick={(event) => openAgentSession(event, primaryCodexSession?.id)}
           onPointerDown={(event) => trackAgentSessionPointerDown(event, primaryCodexSession?.id)}
           onPointerEnter={() => setCodexDetailsOpen(true)}
           onPointerLeave={() => setCodexDetailsOpen(false)}
           aria-label={codexActivityTooltip(snapshot.codexActivity, labels)}
+          style={codexContextStyle(primaryCodexSession)}
         >
           <span>{codexActivityTitle(snapshot.codexActivity, labels)}</span>
           <strong>{codexActivityLabel(snapshot.codexActivity, labels)}</strong>
