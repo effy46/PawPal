@@ -406,6 +406,7 @@ textarea {
   line-height: 1.2;
   min-width: 154px;
   max-width: calc(100% - 12px);
+  min-height: 50px;
   overflow: hidden;
   padding: 7px 40px 7px 10px;
   pointer-events: auto;
@@ -435,6 +436,27 @@ textarea {
   display: block;
   font-size: 12px;
   font-weight: 500;
+}
+
+.codex-badge em,
+.codex-chat-card em {
+  background: rgba(36, 78, 69, 0.08);
+  border-radius: 999px;
+  bottom: 6px;
+  color: #5f766e;
+  display: block;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+  max-width: 110px;
+  overflow: hidden;
+  padding: 3px 5px;
+  position: absolute;
+  right: 8px;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
 }
 
 .codex-badge::after,

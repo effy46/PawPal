@@ -20,6 +20,7 @@ export type CodexActivitySession = {
   message: string | null;
   updatedAt: number;
   path: string;
+  workspaceName?: string;
   context?: {
     percentUsed: number;
     remainingTokens: number;

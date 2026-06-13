@@ -652,6 +652,7 @@ export function PetView(): JSX.Element {
                   {codexSessionMessage(session.message) ? (
                     <p>{codexSessionMessage(session.message)}</p>
                   ) : null}
+                  {session.workspaceName ? <em title={session.workspaceName}>{session.workspaceName}</em> : null}
                 </article>
               ))}
               {hiddenTotalCodexSessionCount ? (
@@ -718,6 +719,9 @@ export function PetView(): JSX.Element {
         >
           <span>{codexActivityTitle(snapshot.codexActivity, labels)}</span>
           <strong>{codexActivityLabel(snapshot.codexActivity, labels)}</strong>
+          {primaryCodexSession?.workspaceName ? (
+            <em title={primaryCodexSession.workspaceName}>{primaryCodexSession.workspaceName}</em>
+          ) : null}
         </div>
       ) : null}
 

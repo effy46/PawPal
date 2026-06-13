@@ -997,7 +997,8 @@ function normalizeCodexActivity(value: unknown): CodexActivity {
             typeof candidate.title === "string" &&
             isCodexActivityState(candidate.state) &&
             typeof candidate.updatedAt === "number" &&
-            typeof candidate.path === "string"
+            typeof candidate.path === "string" &&
+            (candidate.workspaceName === undefined || typeof candidate.workspaceName === "string")
           );
         })
         .slice(0, 5)
@@ -1504,6 +1505,15 @@ function titleForCodexSession(
   return basename(filePath, extname(filePath));
 }
 
+function workspaceNameForCodexSession(events: CodexSessionEvent[]): string | undefined {
+  for (const event of events) {
+    const cwd = event.payload?.cwd?.trim();
+    if (!cwd) continue;
+    return compactCodexText(basename(cwd), 28) ?? undefined;
+  }
+  return undefined;
+}
+
 function idForCodexSession(events: CodexSessionEvent[], filePath: string): string {
   const meta = events.find((event) => event.type === "session_meta" && event.payload?.id);
   return meta?.payload?.id ?? basename(filePath, extname(filePath));
@@ -1581,6 +1591,7 @@ async function inferCodexSessionFileActivity(file: {
       message: messageForCodexSessionEvent(event, labels, events, index),
       updatedAt,
       path: file.path,
+      workspaceName: workspaceNameForCodexSession(events),
       context: latestCodexContextUsage(events)
     };
   }
@@ -1853,6 +1864,15 @@ function idForClaudeSession(events: ClaudeSessionEvent[], filePath: string): str
   return parentSessionId ?? basename(filePath, extname(filePath));
 }
 
+function workspaceNameForClaudeSession(events: ClaudeSessionEvent[]): string | undefined {
+  for (const event of events) {
+    const cwd = event.cwd?.trim();
+    if (!cwd) continue;
+    return compactCodexText(basename(cwd), 28) ?? undefined;
+  }
+  return undefined;
+}
+
 function coalesceClaudeSessions(sessions: CodexActivitySession[]): CodexActivitySession[] {
   const byId = new Map<string, CodexActivitySession>();
   for (const session of sessions) {
@@ -1987,6 +2007,7 @@ async function inferClaudeSessionFileActivity(
       message: messageForClaudeSessionEvent(event, labels, events, index),
       updatedAt,
       path: file.path,
+      workspaceName: workspaceNameForClaudeSession(events),
       context: latestClaudeContextUsage(events)
     };
   }
@@ -2134,6 +2155,12 @@ function cursorComposerTitle(composerId: string, header: CursorComposerHeader | 
   return `Cursor ${composerId.slice(0, 8)}`;
 }
 
+function cursorWorkspaceName(header: CursorComposerHeader | undefined): string | undefined {
+  const workspacePath = header?.workspaceIdentifier?.uri?.fsPath ?? header?.workspaceIdentifier?.uri?.path;
+  if (!workspacePath) return undefined;
+  return compactCodexText(basename(workspacePath), 28) ?? undefined;
+}
+
 function cursorComposerMessage(
   state: CodexActivityState,
   header: CursorComposerHeader | undefined,
@@ -2188,7 +2215,8 @@ async function inferCursorSessionActivity(): Promise<CodexActivity | null> {
       state: latest.state,
       message: cursorComposerMessage(latest.state, header, labels),
       updatedAt: latest.updatedAt,
-      path: latest.path
+      path: latest.path,
+      workspaceName: cursorWorkspaceName(header)
     } satisfies CodexActivitySession;
   });
 
