@@ -179,9 +179,9 @@ async function fetchAppleCalendarMeetings(nowMs: number, horizonMs: number): Pro
     appleCalendarCache = { fetchedAt: nowMs, meetings };
     return meetings;
   } catch (error) {
-    // Negative-cache the failure (keeping any stale meetings) so a broken Calendar.app
-    // does not respawn a long osascript run on every poll tick.
-    appleCalendarCache = { fetchedAt: nowMs, meetings: appleCalendarCache?.meetings ?? [] };
+    // Negative-cache the failure without stale meetings. Reusing the previous
+    // successful read can remind for events the user removed or no longer has.
+    appleCalendarCache = { fetchedAt: nowMs, meetings: [] };
     throw error;
   }
 }

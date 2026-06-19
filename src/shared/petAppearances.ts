@@ -134,7 +134,6 @@ export const PET_APPEARANCES: Record<BuiltInPetAppearanceId, PetAppearanceManife
       breakPrompt: {
         path: [
           lineDog("breakPrompt", "线条小狗第2弹_激动.gif"),
-          lineDog("breakPrompt", "线条小狗第5弹_偷看.gif"),
           lineDog("breakPrompt", "线条小狗第5弹_出去玩.gif")
         ]
       },

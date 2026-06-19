@@ -33,6 +33,7 @@ export function useSnapshot(): AppSnapshot {
       manifests: {},
       jobs: {}
     },
+    activeBubble: null,
     timers: {
       breakDueAt: null,
       hydrationDueAt: null,

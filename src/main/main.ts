@@ -186,6 +186,7 @@ let breakDueAt: number | null = null;
 let hydrationDueAt: number | null = null;
 let focusEndsAt: number | null = null;
 let bubbleTimer: NodeJS.Timeout | null = null;
+let activeBubble: SpeechBubble | null = null;
 let dragTimer: NodeJS.Timeout | null = null;
 let dragSafetyTimer: NodeJS.Timeout | null = null;
 let resizeTimer: NodeJS.Timeout | null = null;
@@ -363,6 +364,7 @@ type CodexSessionEvent = {
     type?: string;
     isCompleted?: boolean;
     name?: string;
+    namespace?: string;
     arguments?: string;
     call_id?: string;
     role?: string;
@@ -389,6 +391,7 @@ type CodexToolActivity =
   | { type: "searchFiles"; query: string | null }
   | { type: "editFiles"; fileCount: number }
   | { type: "webSearch"; query: string | null }
+  | { type: "waitAgent" }
   | { type: "toolCall"; toolName: string | null }
   | { type: "command" };
 
@@ -894,6 +897,7 @@ function snapshot(slot: PetSlotId = "primary"): AppSnapshot {
     stats: getStats(),
     statsHistory: getStatsHistory(store),
     customPetLibrary,
+    activeBubble: isPrimary ? activeBubble : null,
     timers: {
       breakDueAt: isPrimary ? breakDueAt : null,
       hydrationDueAt: isPrimary ? hydrationDueAt : null,
@@ -1366,6 +1370,7 @@ function classifyCodexFunctionCall(event: CodexSessionEvent): CodexToolActivity 
 
   const args = parseCodexToolArguments(payload.arguments);
   const name = payload.name;
+  const namespace = payload.namespace;
 
   if (name === "exec_command") {
     const command = typeof args.cmd === "string" ? args.cmd : null;
@@ -1373,6 +1378,9 @@ function classifyCodexFunctionCall(event: CodexSessionEvent): CodexToolActivity 
   }
 
   if (name === "apply_patch") return { type: "editFiles", fileCount: countPatchFiles(payload.arguments ?? "") };
+  if (name === "wait_agent" || (namespace === "multi_agent_v1" && name?.includes("wait"))) {
+    return { type: "waitAgent" };
+  }
 
   if (name === "web.run" || name === "web_run" || name === "search_query" || name === "image_query") {
     return { type: "webSearch", query: compactCodexText(firstString(args.search_query ?? args.image_query ?? args.q)) };
@@ -1418,6 +1426,8 @@ function messageForCodexToolActivity(
         return running ? labels.codexSearchingQuery(activity.query) : labels.codexSearchedQuery(activity.query);
       }
       return running ? labels.codexSearchingWeb : labels.codexSearchedWeb;
+    case "waitAgent":
+      return running ? labels.codexWaitingForAgent : labels.codexCheckedAgent;
     case "toolCall":
       return running ? labels.codexCallingTool(activity.toolName) : labels.codexCalledTool(activity.toolName);
     case "command":
@@ -2290,10 +2300,23 @@ function setPetFacing(next: PetFacing): void {
 
 function showBubble(bubble: SpeechBubble): void {
   if (bubbleTimer) clearTimeout(bubbleTimer);
+  activeBubble = bubble;
   sendToPet("primary", "pet:show-bubble", bubble);
+  publishSnapshot();
   if (bubble.autoDismissMs) {
     bubbleTimer = setTimeout(() => hideBubble(), bubble.autoDismissMs);
   }
+}
+
+function showAmbientBubble(bubble: SpeechBubble): boolean {
+  if (blockingMode) return false;
+  showBubble(bubble);
+  return true;
+}
+
+function restoreAfterMeetingBubbleDismiss(bubble: SpeechBubble | null): void {
+  if (!bubble?.id.startsWith("zoom-meeting-") || blockingMode) return;
+  setPetState(focusActive ? "focusGuard" : "idle");
 }
 
 function hideBubble(): void {
@@ -2301,7 +2324,11 @@ function hideBubble(): void {
     clearTimeout(bubbleTimer);
     bubbleTimer = null;
   }
+  const dismissedBubble = activeBubble;
+  activeBubble = null;
   sendToPet("primary", "pet:hide-bubble");
+  restoreAfterMeetingBubbleDismiss(dismissedBubble);
+  publishSnapshot();
 }
 
 function rendererUrl(route: "pet" | "settings"): string {
@@ -3220,7 +3247,7 @@ function restorePetsAfterZoomShare(): void {
   zoomShareAutoHidden = false;
   zoomShareRestorePrimary = false;
   zoomShareRestoreSecondary = false;
-  showBubble({ id: "zoom-share-restored", message: pick(text().bubble.zoomShareRestored), autoDismissMs: 1800 });
+  showAmbientBubble({ id: "zoom-share-restored", message: pick(text().bubble.zoomShareRestored), autoDismissMs: 1800 });
   updateTrayMenu();
   publishSnapshot();
 }
@@ -3237,8 +3264,11 @@ async function checkZoomShareAutoHideNow(): Promise<void> {
   // leaving them hidden because detection became unavailable strands them invisible.
   restorePetsAfterZoomShare();
   if (status.state === "permission-needed" && !zoomSharePermissionHintShown) {
-    zoomSharePermissionHintShown = true;
-    showBubble({ id: "zoom-share-permission", message: pick(text().bubble.zoomSharePermission), autoDismissMs: 3200 });
+    zoomSharePermissionHintShown = showAmbientBubble({
+      id: "zoom-share-permission",
+      message: pick(text().bubble.zoomSharePermission),
+      autoDismissMs: 3200
+    });
   }
 }
 
@@ -3315,11 +3345,10 @@ async function readZoomMeetings(settings: Settings): Promise<CalendarMeeting[]> 
       zoomMeetingAppleErrorShown = false;
     } catch (error) {
       if (!zoomMeetingAppleErrorShown) {
-        zoomMeetingAppleErrorShown = true;
         const message = isAppleCalendarPermissionError(error)
           ? pick(text().bubble.zoomMeetingApplePermission)
           : pick(text().bubble.zoomMeetingAppleError);
-        showBubble({ id: "zoom-meeting-apple-error", message, autoDismissMs: 4200 });
+        zoomMeetingAppleErrorShown = showAmbientBubble({ id: "zoom-meeting-apple-error", message, autoDismissMs: 4200 });
       }
     }
   }
@@ -3341,6 +3370,7 @@ function registerZoomMeetingJoinAction(joinUrl: string): string {
 }
 
 function showZoomMeetingReminder(meeting: CalendarMeeting, phase: "lead" | "start", leadMinutes: number): void {
+  if (blockingMode) return;
   const message =
     phase === "lead"
       ? pick(text().bubble.zoomMeetingSoon)(meeting.title, leadMinutes)
@@ -3383,8 +3413,11 @@ async function checkZoomMeetingRemindersNow(): Promise<void> {
     }
   } catch {
     if (!zoomMeetingIcsErrorShown) {
-      zoomMeetingIcsErrorShown = true;
-      showBubble({ id: "zoom-meeting-ics-error", message: pick(text().bubble.zoomMeetingIcsError), autoDismissMs: 4200 });
+      zoomMeetingIcsErrorShown = showAmbientBubble({
+        id: "zoom-meeting-ics-error",
+        message: pick(text().bubble.zoomMeetingIcsError),
+        autoDismissMs: 4200
+      });
     }
   }
 }

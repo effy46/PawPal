@@ -192,6 +192,10 @@ export function PetView(): JSX.Element {
   }, []);
 
   useEffect(() => {
+    setBubble(snapshot.activeBubble);
+  }, [snapshot.activeBubble]);
+
+  useEffect(() => {
     if (!contextMenuPoint) return;
     const close = (): void => setContextMenuPoint(null);
     const closeOnEscape = (event: KeyboardEvent): void => {
@@ -719,6 +723,9 @@ export function PetView(): JSX.Element {
         >
           <span>{codexActivityTitle(snapshot.codexActivity, labels)}</span>
           <strong>{codexActivityLabel(snapshot.codexActivity, labels)}</strong>
+          {codexSessionMessage(primaryCodexSession?.message ?? null) ? (
+            <p>{codexSessionMessage(primaryCodexSession?.message ?? null)}</p>
+          ) : null}
           {primaryCodexSession?.workspaceName ? (
             <em title={primaryCodexSession.workspaceName}>{primaryCodexSession.workspaceName}</em>
           ) : null}

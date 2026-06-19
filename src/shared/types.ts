@@ -222,6 +222,7 @@ export type AppSnapshot = {
   stats: TodayStats;
   statsHistory: StatsHistory;
   customPetLibrary: CustomPetLibrary;
+  activeBubble: SpeechBubble | null;
   timers: TimerStatus;
   distraction: DistractionStatus;
   petState: PetState;
