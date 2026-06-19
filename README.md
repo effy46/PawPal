@@ -6,7 +6,7 @@
 <h1 align="center">PawPal</h1>
 </p>
 <p align="center">
-  A tiny desktop dog that helps you pause, hydrate, and stay focused.
+  A tiny desktop companion for AI agent status, health reminders, and meeting notifications.
 </p>
 
 <p align="center">
@@ -22,7 +22,7 @@
 
 ## English
 
-PawPal is a desktop pet app for macOS and Windows. A transparent, always-on-top dog lives on your screen and gently reminds you to take breaks, drink water, and stay focused.
+PawPal is a desktop pet app for macOS and Windows. A transparent, always-on-top companion lives on your screen, shows AI agent status, and gently handles health reminders, focus nudges, and meeting notifications.
 
 > Design note: I personally love Line Dog, so new updates are designed around the Line Dog style, including new actions, thought bubbles, and text styling.
 
@@ -208,7 +208,7 @@ Source code is released under the [MIT License](LICENSE). Pet animation assets h
 
 ## 中文
 
-PawPal 是一款支持 macOS 和 Windows 的桌面宠物应用。一只透明、始终置顶的小狗会陪在屏幕上，提醒你休息、喝水，并帮助你保持专注。
+PawPal 是一款支持 macOS 和 Windows 的桌面宠物应用。一只透明、始终置顶的桌面伙伴会陪在屏幕上，显示 AI Agent 状态，并温和提醒你休息、喝水、保持专注和准备会议。
 
 > 设计说明：因为我本人喜欢线条小狗，所以所有更新都是围绕线条小狗来制作的，包括新动作、思考内容泡泡🫧和文字 style。
 
