@@ -24,6 +24,7 @@ import {
   DEFAULT_SETTINGS,
   todayKey
 } from "../shared/constants";
+import { filterArchivedAgentSessions } from "../shared/agentActivity";
 import { i18n, pick } from "../shared/i18n";
 import { PET_STATE_ORDER } from "../shared/petAppearances";
 import type {
@@ -266,6 +267,10 @@ function codexSessionsRoot(): string {
 
 function codexSessionIndexPath(): string {
   return join(app.getPath("home"), ".codex", "session_index.jsonl");
+}
+
+function codexStateDatabasePath(): string {
+  return join(app.getPath("home"), ".codex", "state_5.sqlite");
 }
 
 function claudeProjectsRoot(): string {
@@ -1249,6 +1254,36 @@ async function readCodexSessionTitles(): Promise<Map<string, string>> {
   return titles;
 }
 
+async function readArchivedCodexThreadIds(ids: string[]): Promise<Set<string>> {
+  const threadIds = Array.from(new Set(ids.filter((id) => CODEX_THREAD_ID_PATTERN.test(id))));
+  if (!threadIds.length) return new Set();
+
+  const quotedIds = threadIds.map((id) => `'${id}'`).join(",");
+  try {
+    const raw = await execFileText("/usr/bin/sqlite3", [
+      "-readonly",
+      "-noheader",
+      codexStateDatabasePath(),
+      `SELECT id FROM threads WHERE archived = 1 AND id IN (${quotedIds});`
+    ]);
+    return new Set(raw.split(/\r?\n/).map((line) => line.trim()).filter((id) => CODEX_THREAD_ID_PATTERN.test(id)));
+  } catch {
+    return new Set();
+  }
+}
+
+async function filterArchivedCodexSessions(sessions: CodexActivitySession[]): Promise<CodexActivitySession[]> {
+  const archivedIds = await readArchivedCodexThreadIds(sessions.map((session) => session.id));
+  return filterArchivedAgentSessions(sessions, archivedIds);
+}
+
+async function filterArchivedCodexActivity(activity: CodexActivity | null): Promise<CodexActivity | null> {
+  if (!activity || activity.source !== "codex-session" || !activity.sessions.length) return activity;
+  const sessions = await filterArchivedCodexSessions(activity.sessions);
+  if (!sessions.length) return null;
+  return aggregateSessionActivity(sessions, text().settings, "codex", "codex-session");
+}
+
 function parseCodexSessionEvents(raw: string): CodexSessionEvent[] {
   const events: CodexSessionEvent[] = [];
   for (const line of raw.split("\n")) {
@@ -1718,8 +1753,9 @@ async function inferCodexSessionActivity(): Promise<CodexActivity | null> {
   const titleMap = await readCodexSessionTitles();
   const sessions = (await Promise.all(files.map((file) => inferCodexSessionFileActivity(file, titleMap))))
     .filter((session): session is CodexActivitySession => Boolean(session));
-  if (!sessions.length) return null;
-  return aggregateSessionActivity(sessions, text().settings, "codex", "codex-session");
+  const visibleSessions = await filterArchivedCodexSessions(sessions);
+  if (!visibleSessions.length) return null;
+  return aggregateSessionActivity(visibleSessions, text().settings, "codex", "codex-session");
 }
 
 function parseClaudeSessionEvents(raw: string): ClaudeSessionEvent[] {
@@ -2241,6 +2277,7 @@ async function pollAgentActivity(provider: AgentActivityProvider): Promise<void>
       readStoredCodexActivity(),
       inferCodexSessionActivity()
     ]);
+    stored = await filterArchivedCodexActivity(stored);
   } else {
     inferred =
       provider === "claude-code" || provider === "claude-desktop"
