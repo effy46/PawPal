@@ -194,11 +194,11 @@ pet_assets/     Pet animation assets (GIF)
 
 ### Roadmap
 
-- [ ] Chiikawa as a new built-in pet style
-- [ ] Sound effects
-- [ ] Windows distraction detection
-- [ ] Slack linkage
-- [ ] Calendar-aware Pomodoro mode with meeting countdowns and auto-muted reminders
+- [ ] Signed and notarized macOS builds, plus Windows code signing
+- [ ] Windows parity for focus/distraction detection where the OS allows it
+- [ ] Custom pet library polish: import/export, rename, and gallery management
+- [ ] Calendar-aware quiet windows for break and hydration reminders
+- [ ] Optional sound effects with per-reminder mute controls
 
 ### License
 
@@ -380,11 +380,11 @@ pet_assets/     宠物动画素材（GIF）
 
 ### 开发路线
 
-- [ ] 新增 Chiikawa 内置宠物外观
-- [ ] 声音效果
-- [ ] Windows 分心检测
-- [ ] Slack 联动
-- [ ] 日历感知的番茄钟模式，包含会议倒计时和提醒自动静音
+- [ ] macOS 签名与公证，以及 Windows 代码签名
+- [ ] Windows 端专注 / 分心检测能力补齐（在系统权限允许的范围内）
+- [ ] 自定义宠物库优化：导入导出、重命名和图库管理
+- [ ] 基于日历的休息 / 喝水提醒静音时段
+- [ ] 可选声音效果，并支持按提醒类型静音
 
 ### 许可
 
